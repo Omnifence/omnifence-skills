@@ -1,10 +1,12 @@
 ---
 name: omnifence-integration
 description: >-
-  Integrate the Omnifence content moderation API into a codebase. Use when the user asks to
-  "add moderation", "integrate Omnifence", "add content moderation", "moderate generated
-  content", or wants prompts, images, video, audio, or AI-character chat checked before it
-  reaches end users. Finds generation call sites (third-party APIs or in-house platforms),
+  Integrate the Omnifence content moderation API into a codebase. Use whenever the user asks
+  to "add moderation", "integrate Omnifence", "add content moderation", or "moderate
+  generated content" — and also whenever they want AI-generated prompts, images, video,
+  audio, or AI-character chat screened, filtered, blocked, made safe, or checked for policy
+  or NSFW violations before it reaches end users, even if they never say "Omnifence" or
+  "moderation". Finds generation call sites (third-party APIs or in-house platforms),
   confirms them with the user, then wires POST /api/v1/moderate/{text,image,video,audio}
   with async job handling.
 ---

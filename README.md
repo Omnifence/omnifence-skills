@@ -5,9 +5,18 @@ moderation API.
 
 ## Install
 
+As a Claude Code plugin:
+
 ```
-/plugin marketplace add EvershieldAI/omnifence-skills
+/plugin marketplace add Omnifence/omnifence-skills
 /plugin install omnifence-integration@omnifence-skills
+```
+
+Or with the [skills CLI](https://skills.sh) (works with Claude Code, Cursor, Codex, and
+other agents):
+
+```
+npx skills add Omnifence/omnifence-skills
 ```
 
 Then ask your agent to integrate:
