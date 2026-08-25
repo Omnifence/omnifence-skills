@@ -1,0 +1,21 @@
+name: Drift check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly: catch the API changing underneath an unchanged skill.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check skill text against the published OpenAPI spec
+        run: node scripts/check-drift.mjs
