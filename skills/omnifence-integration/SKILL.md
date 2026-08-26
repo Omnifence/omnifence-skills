@@ -44,28 +44,94 @@ search for behavioural signals instead:
 - Streaming chat loops that produce assistant/character replies.
 
 Classify each site by what it **consumes** (a user-written prompt, a chat turn) and what
-it **produces** (image, video, audio, text reply). One site can need two moderation
-steps: the prompt before generation, and the output after.
+it **produces** (image, video, audio, text reply).
 
-## Step 2 — Discovery checkpoint (required)
+## Step 2 — Plan the moderation layers at each site
+
+Most sites need more than one moderation call. Treat each site as an ordered chain of
+layers, not as a single check.
+
+An image endpoint that accepts a user-written prompt carries two layers:
+
+1. The user prompt → `POST /api/v1/moderate/text`, **before** the generation call.
+2. The generated image → `POST /api/v1/moderate/image`, **after** generation and before
+   the image reaches an end user.
+
+Rules for a chain:
+
+- Moderate an input before you spend money on generation. A rejection at layer 1 stops
+  the chain — the generation call does not run.
+- A later layer starts only after the earlier layer returns `pass`. Never submit layer 2
+  while layer 1 is `queued` or `processing`.
+- A rejection at any layer rejects the whole request. Record which layer rejected it and
+  why; the operator needs both.
+- Each layer is a separate job with its own `job_id`. Store every job ID against the
+  request so each decision matches back to its layer.
+- A site can carry three layers. An AI character turn that replies with an image needs
+  the user message (text), the model reply (text), and the generated image (image).
+- A site with no user-supplied input carries one layer. Do not add a text call that has
+  nothing to moderate.
+- When one generated file holds two modalities — a video with a speech track — ask the
+  user whether the video job must also cover the audio. Do not assume one endpoint
+  covers both.
+
+## Step 3 — Find the failure surface before you build one
+
+A moderation layer adds three outcomes the application probably cannot express today:
+content held while a job runs, content rejected, and moderation unavailable (error or
+timeout). Fail-closed behaviour is impossible without a surface for these outcomes.
+
+Search the codebase for the failure handling that already exists:
+
+- An error or exception type, or a result envelope such as `{ ok, error }`.
+- A status enum on the request, job, or media record that already carries states such as
+  `pending`, `failed`, or `blocked`.
+- A user-facing error path: an error response body, an error component, a toast, a
+  notification.
+- An existing retry queue, dead-letter queue, or alerting and logging path.
+
+Then act on what you find:
+
+- **A surface exists — reuse it.** Add the new states to the existing enum, raise the
+  existing error type, and report through the existing path. Never add a second, parallel
+  error system beside the one the codebase already uses.
+- **No surface exists — report it, do not invent one.** This is feedback for the user,
+  and it belongs in the step 4 checkpoint. Name the gap precisely. Example: "`generateImage()`
+  returns a URL or throws. The route has no pending state and no way to tell the caller
+  that generation was blocked. Moderation needs one." Offer options — extend the response
+  shape, add a status field and a poll route, or wait synchronously with a timeout — give
+  your recommendation, and let the user choose. Write the surface only after the user picks.
+- **Generation itself can already fail.** If the site ignores a generation failure today,
+  say so. That gap blocks the moderation integration too, because a held item and a failed
+  item need the same reporting path.
+
+## Step 4 — Discovery checkpoint (required)
 
 **Hard rule: write no integration code until the user approves the call-site list.**
 
 The scan is heuristic. In-house platforms are easy to miss, and a missed call site is
-unmoderated content reaching end users. Before any edit, present the discovered sites as
-a list — one row per site:
+unmoderated content reaching end users. Before any edit, present the discovered sites,
+one block per site:
 
 ```
-file.ts:123 — <what it generates or consumes> — <which endpoint applies>
+file.ts:123 — <what it generates or consumes>
+  layer 1 — <what is moderated> → <endpoint>, before generation
+  layer 2 — <what is moderated> → <endpoint>, after generation
+  failure surface — <the existing type, enum, or path you will hook into>  | MISSING: <the gap and your options>
 ```
 
-Ask the user to confirm the list, remove wrong entries, and add sites the scan missed.
-Ask specifically whether any in-house generation path exists that the scan did not find.
-Only after the user approves do you write code, and only for the approved sites.
+Ask the user to:
 
-## Step 3 — Map each site to an endpoint
+- confirm the list, remove wrong entries, and add sites the scan missed;
+- confirm the layers at each site;
+- say whether any in-house generation path exists that the scan did not find;
+- choose a failure surface at every site marked `MISSING`.
 
-| Call site | Endpoint | Field |
+Only after the user approves do you write code, and only for the approved sites and layers.
+
+## Step 5 — Map each layer to an endpoint
+
+| Layer | Endpoint | Field |
 | --- | --- | --- |
 | User-written generation prompt (moderate **before** the generation call) | `POST /api/v1/moderate/text` | `text` |
 | AI-character chat turn — the user message, and optionally the model reply | `POST /api/v1/moderate/text` | `text` |
@@ -85,7 +151,7 @@ Per-endpoint request/response examples: `references/moderate-text.md`,
 `references/moderate-image.md`, `references/moderate-video.md`,
 `references/moderate-audio.md`.
 
-## Step 4 — Handle the async contract
+## Step 6 — Handle the async contract
 
 Every submission returns `202` with a job ID, not a decision:
 
@@ -103,12 +169,15 @@ The decision arrives later, one of two ways:
    `x-ratelimit-remaining`, and `x-ratelimit-reset` response headers, and honour
    `retry-after` on a `429` — never guess the limit. See `references/polling.md`.
 
+A chain crosses this boundary once per layer. A webhook for layer 1 is what starts
+generation and layer 2; the request stays held between the two.
+
 **Fail closed.** Hold the prompt, chat turn, or generated media in a pending state until
 a `pass` decision arrives. Do not show content to end users while its job is `queued` or
 `processing`, and do not treat a failed job, a timeout, or an API error as a pass. Store
 the `job_id` next to the content so the decision can be matched back to it.
 
-## Step 5 — Handle the decision
+## Step 7 — Handle the decision
 
 A completed job carries:
 
@@ -117,6 +186,9 @@ A completed job carries:
   tripped.
 - `nsfw` — informational label on image/video jobs when the NSFW check is enabled; it
   never causes a rejection on its own.
+
+A request with layers is released only after **every** layer passes. One rejection, one
+failed job, or one timeout at any layer holds the whole request.
 
 **Rejection reasons are for the operator, not for end users.** Log the `reason` and show
 it in internal admin tooling; show end users only a generic "this content was not
@@ -131,15 +203,17 @@ Error handling: `400 INVALID_REQUEST` (bad field or unreachable URL), `401 UNAUT
 (bad key), `402 PAYMENT_REQUIRED` (account out of credit), `429 RATE_LIMITED` (back off
 per `retry-after`), `500`/`503` (retry with backoff). Errors are JSON:
 `{ "error": "CODE", "message": "...", "statusCode": 400 }`. On any error the content
-stays held — fail closed.
+stays held — fail closed. Report the held state through the failure surface agreed in
+step 3.
 
-## Step 6 — Agent guardrails
+## Step 8 — Agent guardrails
 
 - **Show the diff.** Present every change per approved call site; keep changes minimal
   and in the codebase's existing style.
-- **Add tests** around each interception point: prompt rejected → generation not called;
-  media rejected → not published; API error → content stays held; pass → content
-  released.
+- **Add tests** around each layer: prompt rejected → the generation call never runs and
+  no image job is submitted; media rejected → media not published, even though the prompt
+  passed; API error or timeout at any layer → content stays held; every layer passes →
+  content released once.
 - **Never touch `/api/v1/admin/*`.** Those routes are for Omnifence operators, not for
   integrations. Do not call them, document them, or store credentials for them.
 - **Never log or commit the API key.** Read it from an environment variable (for example
