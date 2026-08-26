@@ -12,7 +12,8 @@
     {
       "name": "omnifence-integration",
       "source": "./",
-      "description": "Wire Omnifence content moderation into a codebase: find generation call sites, confirm them with the user, and insert the correct moderation step at each one.",
+      "version": "0.1.1",
+      "description": "Helps you integrate Omnifence content moderation into your app, for text, images, audio, and video.",
       "author": {
         "name": "Omnifence",
         "email": "support@omnifence.ai"
