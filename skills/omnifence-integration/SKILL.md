@@ -125,7 +125,12 @@ Ask the user to:
 - confirm the list, remove wrong entries, and add sites the scan missed;
 - confirm the layers at each site;
 - say whether any in-house generation path exists that the scan did not find;
-- choose a failure surface at every site marked `MISSING`.
+- choose a failure surface at every site marked `MISSING`;
+- confirm the account's moderation configuration matches the plan — a text layer is a
+  silent pass if the account has text moderation switched off
+  (`references/account-config.md`);
+- confirm whether to mint one API key per call site, and how decisions will be received
+  (a signed webhook endpoint, or polling).
 
 Only after the user approves do you write code, and only for the approved sites and layers.
 
@@ -143,9 +148,16 @@ There is **no dedicated chat endpoint**: moderate each chat turn as plain text t
 `/api/v1/moderate/text`. Media endpoints take a URL, not a file body — the media must be
 at a URL the Omnifence classifiers can fetch (a public bucket URL or a presigned URL
 works; a private or internal network address is rejected with `400 INVALID_REQUEST`).
+Direct file parts (`image_file`, `video_file`, `audio_file`) exist but are disabled by
+default per deployment; build on the URL contract unless the user confirms uploads are
+enabled for their account.
 
 All submissions are `multipart/form-data`. Every submission accepts an optional
 `webhook_url` field that overrides the account's global webhook for that job.
+
+What a job actually checks, and what a rejection names, depend on the account's own
+configuration — custom categories, the NSFW and text toggles, and API key attribution.
+Read `references/account-config.md` before writing code that branches on a decision.
 
 Per-endpoint request/response examples: `references/moderate-text.md`,
 `references/moderate-image.md`, `references/moderate-video.md`,
@@ -163,9 +175,15 @@ The decision arrives later, one of two ways:
 
 1. **Webhook (preferred).** Register a global URL via `POST /api/v1/webhook/register`, or
    pass `webhook_url` per request. Omnifence POSTs the result to it on completion and
-   retries failed deliveries for hours. See `references/webhook-handler.md`.
-2. **Polling.** Poll `GET /api/v1/jobs?status=queued,processing` (one request covers all
-   outstanding jobs) or `GET /api/v1/job/{id}`. Pace polling on the `x-ratelimit-limit`,
+   retries failed deliveries for hours. **Every callback is signed, and the handler must
+   verify the signature before it acts on the payload** — the webhook URL is not a secret,
+   and an unverified endpoint releases content on a forged `is_prohibited: false`. Use a
+   [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks) library and
+   read the **raw body bytes**: JSON middleware destroys the bytes the signature covers.
+   See `references/webhook-handler.md`.
+2. **Polling.** Poll `GET /api/v1/jobs?status=queued,processing` (one query covers all
+   outstanding jobs, but the response is paginated — page through `limit`/`offset` to
+   `total`, or you silently drop every job past the first page) or `GET /api/v1/job/{id}`. Pace polling on the `x-ratelimit-limit`,
    `x-ratelimit-remaining`, and `x-ratelimit-reset` response headers, and honour
    `retry-after` on a `429` — never guess the limit. See `references/polling.md`.
 
@@ -183,7 +201,9 @@ A completed job carries:
 
 - `is_prohibited` — `true` = rejected, `false` = passed, `null` while still pending.
 - `reason` — present only on a rejection; names the policy or custom category that
-  tripped.
+  tripped. It is **free text, not a closed enum**: an account defines its own custom
+  categories, and a rejection names one by its slug. Never `switch` on it. See
+  `references/account-config.md`.
 - `nsfw` — informational label on image/video jobs when the NSFW check is enabled; it
   never causes a rejection on its own.
 
@@ -200,8 +220,12 @@ Scopes: each endpoint requires its scope — `moderate:text`, `moderate:image`,
 returns `403 FORBIDDEN`.
 
 Error handling: `400 INVALID_REQUEST` (bad field or unreachable URL), `401 UNAUTHORIZED`
-(bad key), `402 PAYMENT_REQUIRED` (account out of credit), `429 RATE_LIMITED` (back off
-per `retry-after`), `500`/`503` (retry with backoff). Errors are JSON:
+(bad key), `402 PAYMENT_REQUIRED` (account out of credit), `403 FORBIDDEN` (missing
+scope), `429 RATE_LIMITED` (back off per `retry-after`), `500`/`503` (retry with backoff).
+Two more end a retry loop rather than extending it: `403 ACCOUNT_TERMINATED` (the account
+is terminated — not recoverable through the API, so stop and alert an operator) and
+`404 JOB_NOT_FOUND` (the job ID does not exist or belongs to another account — a poll loop
+must stop, not spin to its timeout). Errors are JSON:
 `{ "error": "CODE", "message": "...", "statusCode": 400 }`. On any error the content
 stays held — fail closed. Report the held state through the failure surface agreed in
 step 3.
@@ -213,9 +237,20 @@ step 3.
 - **Add tests** around each layer: prompt rejected → the generation call never runs and
   no image job is submitted; media rejected → media not published, even though the prompt
   passed; API error or timeout at any layer → content stays held; every layer passes →
-  content released once.
+  content released once. Cover the webhook handler too: a body with a missing, wrong, or
+  stale signature → `400` and nothing released; a **signed** body whose `is_prohibited` is
+  missing, `null`, or not a boolean → nothing released; a replayed `delivery_id` →
+  acknowledged twice, released once.
 - **Never touch `/api/v1/admin/*`.** Those routes are for Omnifence operators, not for
   integrations. Do not call them, document them, or store credentials for them.
-- **Never log or commit the API key.** Read it from an environment variable (for example
-  `OMNIFENCE_API_KEY`), never hard-code it, and keep it out of client-side/browser code —
-  moderation calls belong on the server.
+- **One API key per approved call site.** Jobs record the key they were submitted with
+  (`api_key_id`, `api_key_name`), so a key per site turns the job list and the CSV export
+  into a per-site audit trail. Attribution is stamped at submission time and cannot be
+  reconstructed later. Recommend it at the step 4 checkpoint.
+- **Never log or commit the API key or the webhook signing secret.** Read both from
+  environment variables (for example `OMNIFENCE_API_KEY` and `OMNIFENCE_WEBHOOK_SECRET`),
+  never hard-code them, and keep them out of client-side/browser code — moderation calls
+  and webhook handling belong on the server.
+- **Do not change the account's moderation configuration** — custom categories, the NSFW
+  or text toggles, the signing secret — unless the user explicitly asks. Those settings
+  apply to every job the account submits, not just this integration.

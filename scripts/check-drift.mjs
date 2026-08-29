@@ -35,6 +35,20 @@ const REQUIRED_FIELDS = [
   { path: '/api/v1/moderate/image', method: 'post', status: '202', fields: ['job_id', 'status'] },
   { path: '/api/v1/moderate/video', method: 'post', status: '202', fields: ['job_id', 'status'] },
   { path: '/api/v1/moderate/audio', method: 'post', status: '202', fields: ['job_id', 'status'] },
+  { path: '/api/v1/jobs', method: 'get', status: '200', fields: ['jobs'] },
+  { path: '/api/v1/me/webhook-secrets', method: 'get', status: '200', fields: ['secrets', 'tolerance_seconds', 'grace_hours'] },
+  { path: '/api/v1/me/webhook-secrets/reveal', method: 'post', status: '200', fields: ['secret'] },
+  { path: '/api/v1/me/webhook-secrets/rotate', method: 'post', status: '200', fields: ['secret'] },
+  { path: '/api/v1/me/moderation-config', method: 'get', status: '200', fields: ['enabled_categories', 'catalogue'] },
+  { path: '/api/v1/me/custom-categories', method: 'get', status: '200', fields: ['categories', 'count', 'limit'] },
+  // `api_key_id`/`api_key_name` back the one-key-per-call-site guidance in step 8.
+  { path: '/api/v1/job/{id}', method: 'get', status: '200', fields: ['type', 'error_code', 'api_key_id', 'api_key_name'] },
+];
+
+/** Query parameters the skill tells an integration to send. */
+const REQUIRED_PARAMS = [
+  { path: '/api/v1/jobs', method: 'get', params: ['status'] },
+  { path: '/api/v1/jobs/export', method: 'get', params: ['from', 'to'] },
 ];
 
 async function loadSpec() {
@@ -91,6 +105,11 @@ function findSpecPath(specPaths, docPath) {
   });
 }
 
+function operationParams(spec, { path, method }) {
+  const params = spec.paths?.[path]?.[method]?.parameters;
+  return Array.isArray(params) ? params.map((p) => p.name) : null;
+}
+
 function schemaProperties(spec, { path, method, status }) {
   const schema = spec.paths?.[path]?.[method]?.responses?.[status]?.content?.['application/json']?.schema;
   return schema?.properties ?? null;
@@ -132,6 +151,19 @@ for (const check of REQUIRED_FIELDS) {
   for (const field of check.fields) {
     if (!(field in props)) {
       errors.push(`spec: field "${field}" missing from ${check.method.toUpperCase()} ${check.path} ${check.status} response`);
+    }
+  }
+}
+
+for (const check of REQUIRED_PARAMS) {
+  const names = operationParams(spec, check);
+  if (!names) {
+    errors.push(`spec: no parameters on ${check.method.toUpperCase()} ${check.path}`);
+    continue;
+  }
+  for (const param of check.params) {
+    if (!names.includes(param)) {
+      errors.push(`spec: query param "${param}" missing from ${check.method.toUpperCase()} ${check.path}`);
     }
   }
 }

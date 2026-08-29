@@ -1,6 +1,6 @@
 {
   "name": "omnifence-integration",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Wire Omnifence content moderation into a codebase: find generation call sites, confirm them with the user, and insert the correct moderation step at each one.",
   "author": {
     "name": "Omnifence",
