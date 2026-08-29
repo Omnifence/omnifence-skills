@@ -39,14 +39,20 @@ Add Omnifence moderation to this app.
    for generated media.
 4. **Handles the async job contract** — webhook or polling, rate-limit aware, and
    fail-closed: content stays held until a pass decision.
+5. **Verifies signed webhooks** — every callback is signed with
+   [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks), and the
+   handler the agent writes verifies the signature over the raw body before it releases
+   anything.
 
 ## Repository layout
 
 - `skills/omnifence-integration/SKILL.md` — the integration procedure.
 - `skills/omnifence-integration/references/` — per-endpoint request/response examples,
-  a webhook handler, and a polling loop.
-- `scripts/check-drift.mjs` — CI guard: every endpoint path, method, and response field
-  named in the skill must exist in the published OpenAPI spec at
+  a signature-verifying webhook handler, a polling loop, and the account configuration
+  (custom categories, check toggles, API key attribution) that changes what a decision
+  means.
+- `scripts/check-drift.mjs` — CI guard: every endpoint path, method, response field, and
+  query parameter named in the skill must exist in the published OpenAPI spec at
   `https://docs.omnifence.ai/api-reference/openapi.json`, and retired endpoints must not
   appear. Run locally with `node scripts/check-drift.mjs` (`SPEC_URL=` overrides the
   spec source).

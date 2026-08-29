@@ -40,6 +40,12 @@ async function pollJob(jobId, { intervalMs = 4000, timeoutMs = 10 * 60 * 1000 } 
       await sleep(retryAfter * 1000);
       continue;
     }
+    // 404 JOB_NOT_FOUND and 403 ACCOUNT_TERMINATED never become a decision. Stop
+    // now rather than spinning to the timeout, and keep the content held.
+    if (res.status === 404 || res.status === 403) {
+      const { error, message } = await res.json();
+      throw new Error(`Job unreachable: ${error} — ${message}`);
+    }
     if (!res.ok) throw new Error(`Job lookup failed: ${res.status}`);
 
     const job = await res.json();
@@ -64,3 +70,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 A `failed` job never reached a moderation decision (`error_code` says why). Treat it
 exactly like a timeout: the content stays held; retry the submission or surface it to an
 operator.
+
+## Statuses that end the loop
+
+| Response                  | Meaning                                                        | Action                                              |
+| ------------------------- | -------------------------------------------------------------- | --------------------------------------------------- |
+| `404 JOB_NOT_FOUND`       | The job ID does not exist, or belongs to another account.       | Stop polling. Content stays held. Alert an operator. |
+| `403 ACCOUNT_TERMINATED`  | The account is terminated. Not recoverable through the API.     | Stop polling and every submission. Alert an operator.|
+| `403 FORBIDDEN`           | The key is missing the `job:read` scope.                        | Stop polling. Fix the key.                           |
+| `402 PAYMENT_REQUIRED`    | The account credit balance is at or below zero.                 | Stop submitting. Held jobs still complete.           |
+
+Retrying any of these wastes the same rate-limit budget the submission path needs.
+
+## Reconciling a whole batch
+
+`GET /api/v1/jobs?status=queued,processing` also accepts `limit`, `offset`, `type`,
+`decision`, and `search`. For an audit trail rather than a live loop, use
+`GET /api/v1/jobs/export?from=<ISO 8601>&to=<ISO 8601>`, which streams a CSV of the window
+including `api_key_id`, `reason`, and one column per category. See
+`account-config.md`.
