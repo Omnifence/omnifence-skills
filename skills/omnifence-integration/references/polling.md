@@ -5,9 +5,11 @@ low-frequency reconciliation pass alongside webhooks.
 
 ## Which endpoint to poll
 
-- **Many jobs in flight:** `GET /api/v1/jobs?status=queued,processing` — one request
-  covers every outstanding job, whatever the count. When a job disappears from this list,
-  fetch its result once via `GET /api/v1/job/{id}`.
+- **Many jobs in flight:** `GET /api/v1/jobs?status=queued,processing` — one query covers
+  every outstanding job, but the response is **paginated**: `limit` caps at 100 and
+  defaults to 50. Page with `limit` and `offset` until you have all `total` rows. When a
+  job disappears from the completed list, fetch its result once via
+  `GET /api/v1/job/{id}`.
 - **A single job:** `GET /api/v1/job/{id}` (requires the `job:read` scope).
 
 ## Pace on the rate-limit headers
@@ -84,8 +86,40 @@ Retrying any of these wastes the same rate-limit budget the submission path need
 
 ## Reconciling a whole batch
 
-`GET /api/v1/jobs?status=queued,processing` also accepts `limit`, `offset`, `type`,
-`decision`, and `search`. For an audit trail rather than a live loop, use
-`GET /api/v1/jobs/export?from=<ISO 8601>&to=<ISO 8601>`, which streams a CSV of the window
-including `api_key_id`, `reason`, and one column per category. See
-`account-config.md`.
+The response is `{ jobs, total, limit, offset }`. Never treat the first page as the whole
+set — an integration that does silently drops every job past the first 100 and leaves their
+content held forever.
+
+```js
+async function listInFlightJobIds() {
+  const ids = new Set();
+  const limit = 100; // the maximum the endpoint accepts
+  let offset = 0;
+  let total = Infinity;
+
+  while (offset < total) {
+    const url = `https://api.omnifence.ai/api/v1/jobs?status=queued,processing&limit=${limit}&offset=${offset}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.OMNIFENCE_API_KEY}` },
+    });
+    if (!res.ok) throw new Error(`Job list failed: ${res.status}`); // held content stays held
+    const page = await res.json();
+
+    total = page.total;
+    for (const job of page.jobs) ids.add(job.job_id);
+    if (page.jobs.length === 0) break; // defensive: never spin on an empty page
+    offset += page.jobs.length;
+  }
+
+  return ids;
+}
+```
+
+Then diff that set against the job IDs stored beside your held content. A held item whose
+job ID is **absent** from the in-flight set has decided — read its result from
+`GET /api/v1/job/{id}`. A held item still in the set is simply not finished.
+
+The same endpoint also accepts `type`, `decision`, and `search`. For an audit trail rather
+than a live loop, use `GET /api/v1/jobs/export?from=<ISO 8601>&to=<ISO 8601>`, which
+streams a CSV of the window including `api_key_id`, `reason`, and one column per category.
+See `account-config.md`.

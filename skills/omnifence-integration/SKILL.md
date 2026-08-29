@@ -181,8 +181,9 @@ The decision arrives later, one of two ways:
    [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks) library and
    read the **raw body bytes**: JSON middleware destroys the bytes the signature covers.
    See `references/webhook-handler.md`.
-2. **Polling.** Poll `GET /api/v1/jobs?status=queued,processing` (one request covers all
-   outstanding jobs) or `GET /api/v1/job/{id}`. Pace polling on the `x-ratelimit-limit`,
+2. **Polling.** Poll `GET /api/v1/jobs?status=queued,processing` (one query covers all
+   outstanding jobs, but the response is paginated — page through `limit`/`offset` to
+   `total`, or you silently drop every job past the first page) or `GET /api/v1/job/{id}`. Pace polling on the `x-ratelimit-limit`,
    `x-ratelimit-remaining`, and `x-ratelimit-reset` response headers, and honour
    `retry-after` on a `429` — never guess the limit. See `references/polling.md`.
 
@@ -237,8 +238,9 @@ step 3.
   no image job is submitted; media rejected → media not published, even though the prompt
   passed; API error or timeout at any layer → content stays held; every layer passes →
   content released once. Cover the webhook handler too: a body with a missing, wrong, or
-  stale signature → `400` and nothing released; a replayed `delivery_id` → acknowledged
-  once, released once.
+  stale signature → `400` and nothing released; a **signed** body whose `is_prohibited` is
+  missing, `null`, or not a boolean → nothing released; a replayed `delivery_id` →
+  acknowledged twice, released once.
 - **Never touch `/api/v1/admin/*`.** Those routes are for Omnifence operators, not for
   integrations. Do not call them, document them, or store credentials for them.
 - **One API key per approved call site.** Jobs record the key they were submitted with

@@ -92,6 +92,36 @@ A Standard Webhooks library tries each value and accepts the message if one matc
 handler needs no change beyond swapping the secret. Only one previous secret is kept, so
 the header never carries more than two signatures.
 
+## Validate the payload, not just the signature
+
+A valid signature proves who sent the body. It proves nothing about what is in it.
+Release content only on an **explicit `is_prohibited: false`**, and reject anything else:
+
+```js
+status === 'completed' && typeof is_prohibited === 'boolean'
+```
+
+A truthiness check fails open. `is_prohibited` is `null` on a job that has not decided
+yet, and a missing or renamed field is `undefined` — both are falsy, so `if (is_prohibited)
+… else release()` publishes rejected content the moment a wrong-status callback, a producer
+defect, or a schema change reaches the endpoint. Fail closed on an unexpected shape: leave
+the content held and let the reconciliation poll settle it.
+
+## Deduplicate by claiming, before the side effect
+
+`delivery_id` is stable across retries, so it is the idempotency key. Claim it with a
+**unique constraint or a compare-and-set**, and claim it *before* the release or rejection,
+not after. A read-then-write around the side effect leaves two windows open: two concurrent
+retries both pass the check, and a crash after the release but before the write repeats the
+side effect on the next attempt. At layer 1 that starts generation twice and submits the
+layer 2 job twice.
+
+Claiming first has one failure mode of its own: a process that dies mid-handler leaves the
+delivery claimed and the content held, because the retry is dropped as a duplicate. That is
+the right way round. Held content is recovered by the reconciliation poll; content released
+twice is recovered by nothing. Guard the state transition on the content's current state as
+well, so a replay cannot move it twice.
+
 ## Payload
 
 Omnifence POSTs a JSON body when a job completes:
@@ -138,22 +168,36 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
     return res.status(400).send('invalid signature'); // never a 2xx — do not ack a forgery
   }
 
-  const { job_id, is_prohibited, reason, delivery_id } = payload;
+  const { job_id, is_prohibited, reason, delivery_id, status } = payload;
 
-  if (await alreadyProcessed(delivery_id)) {
+  // The signature authenticated the sender, not the shape. Release only on an
+  // explicit boolean false — `null` (still pending), undefined, or any other type
+  // must never reach the release branch.
+  if (
+    typeof job_id !== 'string' ||
+    typeof delivery_id !== 'string' ||
+    status !== 'completed' ||
+    typeof is_prohibited !== 'boolean'
+  ) {
+    return res.status(400).send('unexpected payload'); // content stays held
+  }
+
+  // Claim before the side effect, on a unique constraint over delivery_id, so two
+  // concurrent retries cannot both get through. Returns false if already claimed.
+  if (!(await claimDelivery(delivery_id))) {
     return res.sendStatus(200); // duplicate redelivery
   }
 
   const content = await findHeldContentByJobId(job_id);
   if (!content) return res.sendStatus(200); // unknown job — ack anyway
 
+  // Guard both transitions on the content's current state so a replay is a no-op.
   if (is_prohibited) {
     await markRejected(content, reason); // reason is for operators/logs only
   } else {
     await release(content); // the only path that publishes content
   }
 
-  await markProcessed(delivery_id);
   res.sendStatus(200);
 });
 ```
