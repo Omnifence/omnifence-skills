@@ -10,30 +10,32 @@ Requires the `moderate:video` scope.
 
 `multipart/form-data` fields:
 
-| Field         | Type   | Required | Description                                            |
-| ------------- | ------ | -------- | ------------------------------------------------------ |
-| `video`       | string | Yes      | Publicly reachable HTTP(S) URL of the video, ≤ 300 MB. |
-| `webhook_url` | string | No       | URL to receive the result on completion.               |
+| Field         | Type   | Required | Description                                                                         |
+| ------------- | ------ | -------- | ----------------------------------------------------------------------------------- |
+| `video`       | string | Yes      | Publicly reachable HTTP(S) URL of an MP4, WebM or QuickTime file, ≤ 100 MB.        |
+| `webhook_url` | string | No       | URL to receive the result on completion.                                            |
 
 A URL with another scheme, or one that resolves to a private or internal network
 address, is rejected with `400 INVALID_REQUEST`.
 
+The URL must link directly to the video file. The API probes it before it accepts the job,
+and rejects the request without creating a job or charging the account when:
+
+- the file is larger than 100 MB → `413 PAYLOAD_TOO_LARGE`;
+- the URL serves something other than a video file — an HLS playlist (`.m3u8`), a DASH
+  manifest, an HTML player page → `415 UNSUPPORTED_MEDIA`;
+- the origin refuses the URL (HTTP 404 or 403, an expired signed link) →
+  `422 MEDIA_UNREACHABLE`.
+
+Streaming manifests are never accepted. If the generator produces HLS or DASH output, find
+where it writes a single MP4 rendition and submit that. None of these three succeeds on a
+retry of the same URL — see `submission-errors.md`.
+
 ```js
-const form = new FormData();
-form.append('video', generatedVideoUrl);
-
-const res = await fetch('https://api.omnifence.ai/api/v1/moderate/video', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${process.env.OMNIFENCE_API_KEY}` },
-  body: form,
-});
-
-if (res.status !== 202) {
-  const err = await res.json();
-  throw new Error(`Omnifence submission failed: ${err.error} — ${err.message}`);
-}
-
-const { job_id } = await res.json();
+// submitModeration() is the helper in submission-errors.md. It returns the job ID —
+// including the recovery ID of a 503 SUBMISSION_STATUS_UNKNOWN, flagged by
+// acceptanceUnknown — and throws on every other error. Store both with the held content.
+const { jobId, acceptanceUnknown } = await submitModeration('video', { video: generatedVideoUrl });
 ```
 
 ```bash

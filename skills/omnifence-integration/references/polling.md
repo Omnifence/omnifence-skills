@@ -69,9 +69,25 @@ async function pollJob(jobId, { intervalMs = 4000, timeoutMs = 10 * 60 * 1000 } 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 ```
 
-A `failed` job never reached a moderation decision (`error_code` says why). Treat it
-exactly like a timeout: the content stays held; retry the submission or surface it to an
-operator.
+A `failed` job never reached a moderation decision. Treat it like a timeout: the content
+stays held. The charge is refunded, and the job ID cannot be retried — a resubmission is a
+new job. The same outcome arrives as a `failed` webhook when the job has one.
+
+`error_code` says why, when the pipeline knows. It is optional: never require it, and
+treat an absent or unknown code as "resubmit once, then surface to an operator".
+
+| `error_code`            | Meaning                                                              | Action                                                        |
+| ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `PROVIDER_RATE_LIMITED` | The AI provider rate-limited the job past its retry window.          | Resubmit after a short delay.                                 |
+| `PROVIDER_UNAVAILABLE`  | The AI provider returned server errors on every attempt.             | Resubmit after a short delay.                                 |
+| `PROVIDER_TIMEOUT`      | The AI provider did not answer in time on every attempt.             | Resubmit after a short delay.                                 |
+| `MODEL_UNAVAILABLE`     | The configured model is not served for this input.                   | Resubmit after a short delay.                                 |
+| `MODEL_REFUSED`         | The model refused this exact input.                                  | Do not resubmit it unchanged. Handle as undecidable.          |
+| `MEDIA_UNREACHABLE`     | The media URL did not resolve when fetched (404, expired signed URL). | Do not resubmit the same URL. Mint a fresh URL, then resubmit. |
+| `UNSUPPORTED_MEDIA`     | The media could not be opened (a manifest, an unreadable container). | Do not resubmit the same URL. Submit a direct MP4/WebM/QuickTime file. |
+
+Cap automatic resubmission — one or two attempts — so a persistent provider outage
+surfaces to an operator instead of looping.
 
 ## Statuses that end the loop
 
@@ -83,6 +99,10 @@ operator.
 | `402 PAYMENT_REQUIRED`    | The account credit balance is at or below zero.                 | Stop submitting. Held jobs still complete.           |
 
 Retrying any of these wastes the same rate-limit budget the submission path needs.
+
+One exception: a job ID stored from a `503 SUBMISSION_STATUS_UNKNOWN` response
+(`acceptanceUnknown: true`) that returns `404 JOB_NOT_FOUND` was never accepted. Resubmit
+it once — see `submission-errors.md`.
 
 ## Reconciling a whole batch
 

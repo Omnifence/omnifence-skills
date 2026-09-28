@@ -22,21 +22,10 @@ A URL with another scheme, or one that resolves to a private or internal network
 address, is rejected with `400 INVALID_REQUEST`.
 
 ```js
-const form = new FormData();
-form.append('audio', generatedAudioUrl);
-
-const res = await fetch('https://api.omnifence.ai/api/v1/moderate/audio', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${process.env.OMNIFENCE_API_KEY}` },
-  body: form,
-});
-
-if (res.status !== 202) {
-  const err = await res.json();
-  throw new Error(`Omnifence submission failed: ${err.error} — ${err.message}`);
-}
-
-const { job_id } = await res.json();
+// submitModeration() is the helper in submission-errors.md. It returns the job ID —
+// including the recovery ID of a 503 SUBMISSION_STATUS_UNKNOWN, flagged by
+// acceptanceUnknown — and throws on every other error. Store both with the held content.
+const { jobId, acceptanceUnknown } = await submitModeration('audio', { audio: generatedAudioUrl });
 ```
 
 ```bash

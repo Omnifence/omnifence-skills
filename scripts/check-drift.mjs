@@ -1,12 +1,25 @@
 #!/usr/bin/env node
 /**
- * Drift check: every endpoint path, method, and response field named in the
- * skill text must exist in the published Omnifence OpenAPI spec, and the
- * retired endpoints must not appear at all.
+ * Drift check, in two halves.
+ *
+ * Against the published OpenAPI spec: every endpoint path, method, response
+ * field, response status, and query parameter the skill relies on must exist,
+ * the retired endpoints must not appear at all, and the size limits the skill
+ * states must match the ones the spec states.
+ *
+ * Against the published docs pages: contract facts the spec cannot express —
+ * error codes, failed-job `error_code` values, webhook payload fields, and
+ * scopes — must match in both directions. A code, field, or scope the docs add
+ * that the skill never mentions fails the check, and so does one the skill
+ * names that the docs no longer list. Existence of a path is not enough: the
+ * old check passed for a month while the webhook contract and the video limit
+ * changed underneath the skill.
  *
  * Spec source: https://docs.omnifence.ai/api-reference/openapi.json
  * (exported by the API repo's `yarn export:openapi`, hosted by the docs site).
- * Override with SPEC_URL=<url or local file path> for local runs.
+ * Docs source: the same site's raw markdown (`<page>.md`).
+ * Local runs: SPEC_URL=<url or file> and DOCS_URL=<url>, or DOCS_DIR=<the API
+ * repo's docs/ directory> to check against unpublished `.mdx` sources.
  */
 
 import { readFile, readdir } from 'node:fs/promises';
@@ -16,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILLS_DIR = join(ROOT, 'skills');
 const SPEC_URL = process.env.SPEC_URL ?? 'https://docs.omnifence.ai/api-reference/openapi.json';
+const DOCS_URL = (process.env.DOCS_URL ?? 'https://docs.omnifence.ai').replace(/\/$/, '');
+const DOCS_DIR = process.env.DOCS_DIR;
 
 /** Retired endpoints and their scopes/slugs. Their reappearance anywhere in the
  * skill text is a hard failure, whatever the spec says. */
@@ -43,7 +58,71 @@ const REQUIRED_FIELDS = [
   { path: '/api/v1/me/custom-categories', method: 'get', status: '200', fields: ['categories', 'count', 'limit'] },
   // `api_key_id`/`api_key_name` back the one-key-per-call-site guidance in step 8.
   { path: '/api/v1/job/{id}', method: 'get', status: '200', fields: ['type', 'error_code', 'api_key_id', 'api_key_name'] },
+  { path: '/api/v1/me/default-categories', method: 'get', status: '200', fields: ['categories'] },
+  // The recovery `job_id` on 503 SUBMISSION_STATUS_UNKNOWN: submission-errors.md polls it
+  // instead of resubmitting.
+  ...['text', 'image', 'video', 'audio'].map((m) => ({
+    path: `/api/v1/moderate/${m}`, method: 'post', status: '503', fields: ['job_id'],
+  })),
 ];
+
+/** Response statuses the skill tells an integration to handle. */
+const REQUIRED_STATUSES = [
+  { path: '/api/v1/moderate/video', method: 'post', statuses: ['202', '413', '415', '422', '503'] },
+  { path: '/api/v1/moderate/text', method: 'post', statuses: ['202', '503'] },
+  { path: '/api/v1/moderate/image', method: 'post', statuses: ['202', '503'] },
+  { path: '/api/v1/moderate/audio', method: 'post', statuses: ['202', '503'] },
+];
+
+/** Enum values the skill branches on. */
+const REQUIRED_ENUMS = [
+  { path: '/api/v1/job/{id}', method: 'get', status: '200', field: 'status', values: ['queued', 'processing', 'completed', 'failed'] },
+];
+
+/**
+ * Numeric limits the skill states. `source` pulls the authoritative value(s) out
+ * of the spec or a docs page; each `skill` entry pulls every statement of the
+ * same limit out of one skill file. Every statement must equal the source, and
+ * each file must state it at least once.
+ */
+const LIMITS = [
+  {
+    name: 'video size (MB)',
+    source: { spec: ['/api/v1/moderate/video', 'post'], re: /larger than (\d+) MB/ },
+    skill: [
+      { file: 'references/moderate-video.md', re: /(\d+) MB/g },
+      { file: 'SKILL.md', re: /Generated video[^\n]*?≤ (\d+) MB/g },
+    ],
+  },
+  {
+    name: 'audio size (MB)',
+    source: { spec: ['/api/v1/moderate/audio', 'post'], re: /no larger than (\d+) MB/ },
+    skill: [
+      { file: 'references/moderate-audio.md', re: /(\d+) MB/g },
+      { file: 'SKILL.md', re: /Generated audio[^\n]*?≤ (\d+) MB/g },
+    ],
+  },
+  {
+    name: 'audio duration (minutes)',
+    source: { spec: ['/api/v1/moderate/audio', 'post'], re: /no longer than (\d+) minutes/ },
+    skill: [
+      { file: 'references/moderate-audio.md', re: /(\d+) minutes/g },
+      { file: 'SKILL.md', re: /Generated audio[^\n]*?≤ (\d+) minutes/g },
+    ],
+  },
+  {
+    name: 'text length (characters)',
+    source: { doc: 'api-reference/endpoint/text-moderate', re: /limited to ([\d,]+) characters/ },
+    skill: [
+      { file: 'references/moderate-text.md', re: /([\d,]+) characters/g },
+      { file: 'references/submission-errors.md', re: /([\d,]+) characters/g },
+      { file: 'SKILL.md', re: /([\d,]+) characters/g },
+    ],
+  },
+];
+
+/** Backticked UPPER_SNAKE tokens that are not API codes (env vars and the like). */
+const NOT_A_CODE = /^OMNIFENCE_/;
 
 /** Query parameters the skill tells an integration to send. */
 const REQUIRED_PARAMS = [
@@ -60,6 +139,47 @@ async function loadSpec() {
   return res.json();
 }
 
+/** Raw markdown of one docs page: `<page>.md` from the site, or `<page>.mdx` from DOCS_DIR. */
+async function loadDoc(page) {
+  if (DOCS_DIR) return readFile(join(DOCS_DIR, `${page}.mdx`), 'utf8');
+  const url = `${DOCS_URL}/${page}.md`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch docs page (${res.status}) from ${url}`);
+  return res.text();
+}
+
+/** The backticked first-column values of every markdown table row in `text`. */
+function tableKeys(text) {
+  const keys = [];
+  for (const m of text.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)) keys.push(m[1]);
+  return keys;
+}
+
+/** `text` from a `### heading` (or `## heading`) up to the next heading of the same level or higher. */
+function section(text, heading) {
+  const start = text.search(new RegExp(`^#{2,3} ${heading}\\s*$`, 'm'));
+  if (start === -1) return null;
+  const level = text.slice(start).match(/^#+/)[0].length;
+  const rest = text.slice(start + level + 1);
+  const end = rest.search(new RegExp(`^#{2,${level}} `, 'm'));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Every UPPER_SNAKE code inside backticks, with or without a leading status (`404 JOB_NOT_FOUND`). */
+function backtickedCodes(text) {
+  const codes = new Set();
+  for (const m of text.matchAll(/`(?:\d{3} )?([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)`/g)) {
+    if (!NOT_A_CODE.test(m[1])) codes.add(m[1]);
+  }
+  return codes;
+}
+
+function backtickedScopes(text) {
+  const scopes = new Set();
+  for (const m of text.matchAll(/`([a-z]+:[a-z]+)`/g)) scopes.add(m[1]);
+  return scopes;
+}
+
 async function collectMarkdown(dir) {
   const files = [];
   for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) {
@@ -72,11 +192,11 @@ async function collectMarkdown(dir) {
   return files;
 }
 
-/** Expand `/moderate/{text,image}` brace sets; normalise `${var}` to `{id}`. */
+/** Expand `/moderate/{text,image}` brace sets; normalise a JS `${var}` to the `{*}` wildcard. */
 function extractReferences(text) {
   const refs = [];
-  const cleaned = text.replace(/\$\{[^}]*\}/g, '{id}');
-  const re = /(?:\b(GET|POST|PUT|DELETE)\s+)?(\/api\/v1\/[A-Za-z0-9_\-/{},$]+)/g;
+  const cleaned = text.replace(/\$\{[^}]*\}/g, '{*}');
+  const re = /(?:\b(GET|POST|PUT|DELETE)\s+)?(\/api\/v1\/[A-Za-z0-9_\-/{},$*]+)/g;
   for (const match of cleaned.matchAll(re)) {
     const method = match[1]?.toLowerCase();
     let path = match[2].split('?')[0].replace(/[/,.]+$/, '');
@@ -92,7 +212,11 @@ function extractReferences(text) {
   return refs;
 }
 
-/** Match a documented path against spec paths, treating `{param}` as a wildcard segment. */
+/**
+ * Match a documented path against spec paths. A documented `{param}` matches a spec
+ * `{param}`; a `{*}` (a JS interpolation, such as `/moderate/${endpoint}`) matches any
+ * segment, because the code fills it at run time.
+ */
 function findSpecPath(specPaths, docPath) {
   const docSegs = docPath.split('/');
   return specPaths.find((specPath) => {
@@ -100,7 +224,7 @@ function findSpecPath(specPaths, docPath) {
     if (specSegs.length !== docSegs.length) return false;
     return specSegs.every((seg, i) => {
       const isParam = (s) => s.startsWith('{') && s.endsWith('}');
-      return seg === docSegs[i] || (isParam(seg) && isParam(docSegs[i]));
+      return seg === docSegs[i] || docSegs[i] === '{*}' || (isParam(seg) && isParam(docSegs[i]));
     });
   });
 }
@@ -168,10 +292,126 @@ for (const check of REQUIRED_PARAMS) {
   }
 }
 
+for (const check of REQUIRED_STATUSES) {
+  const responses = spec.paths?.[check.path]?.[check.method]?.responses ?? {};
+  for (const status of check.statuses) {
+    if (!(status in responses)) {
+      errors.push(`spec: ${check.method.toUpperCase()} ${check.path} no longer documents a ${status} response`);
+    }
+  }
+}
+
+for (const check of REQUIRED_ENUMS) {
+  const values = schemaProperties(spec, check)?.[check.field]?.enum;
+  if (!Array.isArray(values)) {
+    errors.push(`spec: no enum for "${check.field}" on ${check.method.toUpperCase()} ${check.path} ${check.status}`);
+    continue;
+  }
+  for (const v of values) {
+    if (!check.values.includes(v)) {
+      errors.push(`spec: "${check.field}" on ${check.method.toUpperCase()} ${check.path} gained the value "${v}" the skill does not handle`);
+    }
+  }
+  for (const v of check.values) {
+    if (!values.includes(v)) {
+      errors.push(`spec: "${check.field}" on ${check.method.toUpperCase()} ${check.path} lost the value "${v}" the skill branches on`);
+    }
+  }
+}
+
+// --- Docs-page checks -------------------------------------------------------
+
+const skillFile = (name) => {
+  const hit = files.find((f) => f.path.endsWith(`/omnifence-integration/${name}`));
+  if (!hit) {
+    errors.push(`${name}: the file the drift check reads is missing`);
+    return '';
+  }
+  return hit.text;
+};
+const allSkillText = files.map((f) => f.text).join('\n');
+const normalise = (n) => n.replace(/,/g, '');
+
+const docs = Object.fromEntries(
+  await Promise.all(
+    ['errors', 'platform/error-recovery', 'platform/webhooks', 'authentication', 'api-reference/endpoint/text-moderate'].map(
+      async (page) => [page, await loadDoc(page)],
+    ),
+  ),
+);
+
+for (const limit of LIMITS) {
+  const sourceText = limit.source.spec
+    ? spec.paths?.[limit.source.spec[0]]?.[limit.source.spec[1]]?.description ?? ''
+    : docs[limit.source.doc];
+  const expected = sourceText.match(limit.source.re)?.[1];
+  if (!expected) {
+    errors.push(`limits: the source no longer states the ${limit.name} (pattern ${limit.source.re})`);
+    continue;
+  }
+  for (const { file, re } of limit.skill) {
+    const found = [...skillFile(file).matchAll(re)].map((m) => m[1]);
+    if (found.length === 0) errors.push(`${file}: does not state the ${limit.name} (${expected})`);
+    for (const value of found) {
+      if (normalise(value) !== normalise(expected)) {
+        errors.push(`${file}: states the ${limit.name} as ${value}; the API says ${expected}`);
+      }
+    }
+  }
+}
+
+// API error codes (errors page table) and failed-job `error_code` values
+// (error-recovery bullets, webhooks table): every one must appear in the skill.
+const errorCodes = tableKeys(docs['errors']);
+const jobErrorCodes = [
+  ...[...docs['platform/error-recovery'].matchAll(/^[-*] `([A-Z][A-Z0-9_]+)`:/gm)].map((m) => m[1]),
+  ...tableKeys(section(docs['platform/webhooks'], 'Failed job') ?? ''),
+];
+if (errorCodes.length === 0) errors.push('docs: no error code table found on the errors page');
+if (jobErrorCodes.length === 0) errors.push('docs: no failed-job error_code values found');
+for (const code of new Set([...errorCodes, ...jobErrorCodes])) {
+  if (!allSkillText.includes(code)) {
+    errors.push(`docs: the error code ${code} is documented but the skill never handles it`);
+  }
+}
+
+// The reverse: every code the skill names must still be documented somewhere.
+const documentedCodes = new Set(Object.values(docs).flatMap((text) => [...backtickedCodes(text)]));
+for (const code of backtickedCodes(allSkillText)) {
+  if (!documentedCodes.has(code)) {
+    errors.push(`skill: names the code ${code}, which the docs no longer list`);
+  }
+}
+
+// Webhook payload fields: the docs table must match the webhook reference.
+const webhookFields = tableKeys(section(docs['platform/webhooks'], 'Fields') ?? '');
+if (webhookFields.length === 0) errors.push('docs: no webhook payload field table found');
+const handlerText = skillFile('references/webhook-handler.md');
+for (const field of webhookFields) {
+  if (!handlerText.includes(`\`${field}\``)) {
+    errors.push(`references/webhook-handler.md: webhook payload field "${field}" is documented but not covered`);
+  }
+}
+
+// Scopes, both directions.
+const docScopes = new Set(tableKeys(docs['authentication']).filter((k) => /^[a-z]+:[a-z]+$/.test(k)));
+if (docScopes.size === 0) errors.push('docs: no scope table found on the authentication page');
+for (const scope of docScopes) {
+  if (!allSkillText.includes(`\`${scope}\``)) {
+    errors.push(`docs: the scope ${scope} is documented but the skill never names it`);
+  }
+}
+for (const scope of backtickedScopes(allSkillText)) {
+  if (docScopes.size > 0 && !docScopes.has(scope)) {
+    errors.push(`skill: names the scope ${scope}, which the docs no longer list`);
+  }
+}
+
+const docsSource = DOCS_DIR ?? DOCS_URL;
 if (errors.length > 0) {
-  console.error(`Drift check FAILED against ${SPEC_URL}:\n`);
+  console.error(`Drift check FAILED against ${SPEC_URL} and ${docsSource}:\n`);
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
 }
 
-console.warn(`Drift check passed: ${files.length} skill file(s) match ${SPEC_URL}`);
+console.warn(`Drift check passed: ${files.length} skill file(s) match ${SPEC_URL} and ${docsSource}`);
