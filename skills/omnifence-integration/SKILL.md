@@ -127,10 +127,14 @@ Ask the user to:
 - say whether any in-house generation path exists that the scan did not find;
 - choose a failure surface at every site marked `MISSING`;
 - confirm the account's moderation configuration matches the plan — a text layer is a
-  silent pass if the account has text moderation switched off
-  (`references/account-config.md`);
+  silent pass if the account has text moderation switched off, and a default policy
+  category the account switched off no longer rejects (`references/account-config.md`);
 - confirm whether to mint one API key per call site, and how decisions will be received
-  (a signed webhook endpoint, or polling).
+  (a signed webhook endpoint, or polling). A global webhook URL is set by the account
+  holder in the dashboard, or per request with `webhook_url` — an integration key cannot
+  register one;
+- at a video site, confirm the generator writes a single MP4, WebM or QuickTime file of at
+  most 100 MB. A streaming manifest (HLS, DASH) or a larger file is rejected at submission.
 
 Only after the user approves do you write code, and only for the approved sites and layers.
 
@@ -138,10 +142,10 @@ Only after the user approves do you write code, and only for the approved sites 
 
 | Layer | Endpoint | Field |
 | --- | --- | --- |
-| User-written generation prompt (moderate **before** the generation call) | `POST /api/v1/moderate/text` | `text` |
-| AI-character chat turn — the user message, and optionally the model reply | `POST /api/v1/moderate/text` | `text` |
+| User-written generation prompt (moderate **before** the generation call) | `POST /api/v1/moderate/text` | `text` (≤ 20,000 characters) |
+| AI-character chat turn — the user message, and optionally the model reply | `POST /api/v1/moderate/text` | `text` (≤ 20,000 characters) |
 | Generated image | `POST /api/v1/moderate/image` | `image` (publicly reachable HTTPS URL, ≤ 10 MB) |
-| Generated video | `POST /api/v1/moderate/video` | `video` (publicly reachable HTTPS URL, ≤ 300 MB) |
+| Generated video | `POST /api/v1/moderate/video` | `video` (publicly reachable HTTPS URL of an MP4, WebM or QuickTime file, ≤ 100 MB) |
 | Generated audio | `POST /api/v1/moderate/audio` | `audio` (publicly reachable HTTPS URL, ≤ 100 MB, ≤ 30 minutes) |
 
 There is **no dedicated chat endpoint**: moderate each chat turn as plain text through
@@ -155,13 +159,22 @@ enabled for their account.
 All submissions are `multipart/form-data`. Every submission accepts an optional
 `webhook_url` field that overrides the account's global webhook for that job.
 
+Text over 20,000 characters is rejected, not truncated. Split longer text into chunks,
+submit each as its own job, and release the text only when every chunk passes. Never cut
+the text down to fit — the cut-off part would pass unchecked.
+
+The video endpoint probes the URL before it accepts the job. A file over 100 MB, a
+streaming manifest, or a URL the origin refuses is rejected at once with `413`, `415` or
+`422`, and no job is created.
+
 What a job actually checks, and what a rejection names, depend on the account's own
 configuration — custom categories, the NSFW and text toggles, and API key attribution.
 Read `references/account-config.md` before writing code that branches on a decision.
 
 Per-endpoint request/response examples: `references/moderate-text.md`,
 `references/moderate-image.md`, `references/moderate-video.md`,
-`references/moderate-audio.md`.
+`references/moderate-audio.md`. They share one submit helper, in
+`references/submission-errors.md`.
 
 ## Step 6 — Handle the async contract
 
@@ -173,9 +186,13 @@ Every submission returns `202` with a job ID, not a decision:
 
 The decision arrives later, one of two ways:
 
-1. **Webhook (preferred).** Register a global URL via `POST /api/v1/webhook/register`, or
-   pass `webhook_url` per request. Omnifence POSTs the result to it on completion and
-   retries failed deliveries for hours. **Every callback is signed, and the handler must
+1. **Webhook (preferred).** The account holder sets a global URL in the dashboard under
+   **Account → Webhooks**, or the integration passes `webhook_url` per request.
+   (`POST /api/v1/webhook/register` needs the `webhook:manage` scope, which API keys do
+   not carry by default.) Omnifence POSTs the outcome to it once the job settles and
+   retries failed deliveries for hours. The outcome is a `completed` result or a `failed`
+   notice; the handler must acknowledge both and release content only on a `completed`
+   result. **Every callback is signed, and the handler must
    verify the signature before it acts on the payload** — the webhook URL is not a secret,
    and an unverified endpoint releases content on a forged `is_prohibited: false`. Use a
    [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks) library and
@@ -207,6 +224,11 @@ A completed job carries:
 - `nsfw` — informational label on image/video jobs when the NSFW check is enabled; it
   never causes a rejection on its own.
 
+A **failed** job (`status: "failed"`, `is_prohibited: null`) reached no decision. It is
+refunded, and it keeps the content held. Its optional `error_code` says whether a
+resubmission can help — a provider outage can, a refused input or a dead media URL cannot.
+See `references/polling.md`.
+
 A request with layers is released only after **every** layer passes. One rejection, one
 failed job, or one timeout at any layer holds the whole request.
 
@@ -219,16 +241,25 @@ Scopes: each endpoint requires its scope — `moderate:text`, `moderate:image`,
 `moderate:video`, `moderate:audio`; reading a job requires `job:read`. A missing scope
 returns `403 FORBIDDEN`.
 
-Error handling: `400 INVALID_REQUEST` (bad field or unreachable URL), `401 UNAUTHORIZED`
-(bad key), `402 PAYMENT_REQUIRED` (account out of credit), `403 FORBIDDEN` (missing
-scope), `429 RATE_LIMITED` (back off per `retry-after`), `500`/`503` (retry with backoff).
-Two more end a retry loop rather than extending it: `403 ACCOUNT_TERMINATED` (the account
-is terminated — not recoverable through the API, so stop and alert an operator) and
-`404 JOB_NOT_FOUND` (the job ID does not exist or belongs to another account — a poll loop
-must stop, not spin to its timeout). Errors are JSON:
-`{ "error": "CODE", "message": "...", "statusCode": 400 }`. On any error the content
-stays held — fail closed. Report the held state through the failure surface agreed in
-step 3.
+Error handling (full table and a submit helper in `references/submission-errors.md`):
+
+- **Retry later:** `429 RATE_LIMITED` (wait `retry-after`), `500 INTERNAL_ERROR`, and
+  `503 SERVICE_UNAVAILABLE` (wait at least `retry-after` when sent, then back off with
+  jitter).
+- **Stop and fix:** `400 INVALID_REQUEST` (bad field, text over the limit, private or
+  non-HTTP URL), `401 UNAUTHORIZED`, `402 PAYMENT_REQUIRED` (account out of credit),
+  `403 FORBIDDEN` (missing scope), `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA` and
+  `422 MEDIA_UNREACHABLE` (the media URL — the same URL fails the same way every time).
+- **`503 SUBMISSION_STATUS_UNKNOWN`:** the job may exist. The body carries its `job_id`.
+  Hold the content against that ID and poll it; resubmit only if it returns
+  `404 JOB_NOT_FOUND`. Resubmitting blindly can bill the same content twice.
+- **End the loop:** `403 ACCOUNT_TERMINATED` (not recoverable through the API — stop and
+  alert an operator) and `404 JOB_NOT_FOUND` on a poll (a poll loop must stop, not spin to
+  its timeout).
+
+Errors are JSON: `{ "error": "CODE", "message": "...", "statusCode": 400 }`. On any error
+the content stays held — fail closed. Report the held state through the failure surface
+agreed in step 3.
 
 ## Step 8 — Agent guardrails
 
@@ -238,9 +269,12 @@ step 3.
   no image job is submitted; media rejected → media not published, even though the prompt
   passed; API error or timeout at any layer → content stays held; every layer passes →
   content released once. Cover the webhook handler too: a body with a missing, wrong, or
-  stale signature → `400` and nothing released; a **signed** body whose `is_prohibited` is
-  missing, `null`, or not a boolean → nothing released; a replayed `delivery_id` →
-  acknowledged twice, released once.
+  stale signature → `400` and nothing released; a **signed** `completed` body whose
+  `is_prohibited` is missing, `null`, or not a boolean → nothing released; a **signed**
+  `failed` body → `2xx`, content held and marked failed; a replayed `delivery_id` →
+  acknowledged twice, released once. Cover submission too: a `503
+  SUBMISSION_STATUS_UNKNOWN` → the returned `job_id` is stored and no second job is
+  submitted; a `413`/`415`/`422` → no retry of the same URL.
 - **Never touch `/api/v1/admin/*`.** Those routes are for Omnifence operators, not for
   integrations. Do not call them, document them, or store credentials for them.
 - **One API key per approved call site.** Jobs record the key they were submitted with
@@ -251,6 +285,8 @@ step 3.
   environment variables (for example `OMNIFENCE_API_KEY` and `OMNIFENCE_WEBHOOK_SECRET`),
   never hard-code them, and keep them out of client-side/browser code — moderation calls
   and webhook handling belong on the server.
-- **Do not change the account's moderation configuration** — custom categories, the NSFW
-  or text toggles, the signing secret — unless the user explicitly asks. Those settings
-  apply to every job the account submits, not just this integration.
+- **Do not change the account's moderation configuration** — custom categories, default
+  categories, the NSFW or text toggles, the webhook URL, the signing secret — unless the
+  user explicitly asks. Those settings apply to every job the account submits, not just
+  this integration. Their write routes need the `webhook:manage` or `account:config`
+  scope; do not ask for either on an integration key.

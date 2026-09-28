@@ -48,14 +48,19 @@ Add Omnifence moderation to this app.
 
 - `skills/omnifence-integration/SKILL.md` — the integration procedure.
 - `skills/omnifence-integration/references/` — per-endpoint request/response examples,
-  a signature-verifying webhook handler, a polling loop, and the account configuration
-  (custom categories, check toggles, API key attribution) that changes what a decision
-  means.
-- `scripts/check-drift.mjs` — CI guard: every endpoint path, method, response field, and
-  query parameter named in the skill must exist in the published OpenAPI spec at
-  `https://docs.omnifence.ai/api-reference/openapi.json`, and retired endpoints must not
-  appear. Run locally with `node scripts/check-drift.mjs` (`SPEC_URL=` overrides the
-  spec source).
+  a shared submit helper with the full error table, a signature-verifying webhook handler
+  (completed and failed callbacks), a polling loop, and the account configuration
+  (custom and default categories, check toggles, API key attribution) that changes what
+  a decision means.
+- `scripts/check-drift.mjs` — CI guard, run on every push and weekly. Against the
+  published OpenAPI spec at `https://docs.omnifence.ai/api-reference/openapi.json`: every
+  endpoint path, method, response field, response status, enum value, and query parameter
+  the skill relies on must exist, retired endpoints must not appear, and the size limits
+  the skill states must match. Against the published docs pages: error codes, failed-job
+  `error_code` values, webhook payload fields, and scopes must match the skill in both
+  directions. Run locally with `node scripts/check-drift.mjs`. `SPEC_URL=` and
+  `DOCS_URL=` override the sources; `DOCS_DIR=<API repo>/docs` checks against unpublished
+  `.mdx` sources.
 
 ## Docs
 

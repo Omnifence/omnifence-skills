@@ -8,6 +8,12 @@ production settings for every job the account submits, not integration scaffoldi
 Read them to understand the decisions the integration will receive, and report what you
 find. Change one only when the user explicitly asks.
 
+Reading needs no extra scope. Every write — the toggles and custom categories — needs the
+`account:config` scope, which is **off by default on API keys**, so an integration key gets
+`403 FORBIDDEN`. That is deliberate: a key that only submits content must not be able to
+switch coverage off. Point the user to the dashboard under **Account**; do not ask for the
+scope on the integration key.
+
 ## Custom categories
 
 A custom category is the account's own prohibited-content rule, written in plain language.
@@ -19,13 +25,13 @@ category the account invented, by the category's `slug`. Code that maps a reject
 internal handling must treat `reason` as free text and must not switch on a closed set of
 values.
 
-| Method   | Endpoint                                              | Purpose                                    |
-| -------- | ----------------------------------------------------- | ------------------------------------------ |
-| `GET`    | `/api/v1/me/custom-categories`                        | List the categories and the account limit  |
-| `POST`   | `/api/v1/me/custom-categories`                        | Create a category                          |
-| `POST`   | `/api/v1/me/custom-categories/generate-prompt`        | Draft a system prompt from a description   |
-| `PUT`    | `/api/v1/me/custom-categories/{id}`                   | Update a category, or enable/disable it    |
-| `DELETE` | `/api/v1/me/custom-categories/{id}`                   | Delete a category                          |
+| Method   | Endpoint                                              | Purpose                                    | Scope            |
+| -------- | ----------------------------------------------------- | ------------------------------------------ | ---------------- |
+| `GET`    | `/api/v1/me/custom-categories`                        | List the categories and the account limit  | none             |
+| `POST`   | `/api/v1/me/custom-categories`                        | Create a category                          | `account:config` |
+| `POST`   | `/api/v1/me/custom-categories/generate-prompt`        | Draft a system prompt from a description   | `account:config` |
+| `PUT`    | `/api/v1/me/custom-categories/{id}`                   | Update a category, or enable/disable it    | `account:config` |
+| `DELETE` | `/api/v1/me/custom-categories/{id}`                   | Delete a category                          | `account:config` |
 
 ```bash
 curl https://api.omnifence.ai/api/v1/me/custom-categories \
@@ -64,23 +70,26 @@ speech matches it.
 
 ## Per-account check toggles
 
-`GET /api/v1/me/moderation-config` returns the toggles and a catalogue of the available
-categories with display metadata.
+`GET /api/v1/me/moderation-config` returns the toggles and a catalogue of the built-in
+toggles (`nsfw` and `text`) with display metadata.
 
 ```json
 {
-  "enabled_categories": { "nsfw": true, "text": true },
+  "enabled_categories": { "nsfw": false, "default_<id>": false },
   "catalogue": { "nsfw": { "label": "…", "description": "…", "icon": "…" }, "text": { "…": "…" } }
 }
 ```
 
-A category is enabled unless its key is explicitly `false`.
+`enabled_categories` holds only the checks switched off. A key that is absent, or `true`, is
+enabled.
 
-| Check                       | Toggleable | Effect on the integration                                              |
-| --------------------------- | ---------- | ---------------------------------------------------------------------- |
-| AI Adult General            | No         | Always runs on every job. Cannot be disabled.                          |
-| NSFW label                  | Yes        | Off: the check does not run and `nsfw` is absent from the result.      |
-| Text moderation             | Yes        | Off: text jobs pass unchecked.                                         |
+| Check                     | Toggleable | Effect on the integration                                                   |
+| ------------------------- | ---------- | --------------------------------------------------------------------------- |
+| AI Adult General          | No         | Always runs on image and video, over the default categories still enabled.  |
+| Underage                  | No         | Always runs on image and video. Child-safety checks cannot be switched off. |
+| NSFW label                | Yes        | Off: the check does not run and `nsfw` is absent from the result.           |
+| Text moderation           | Yes        | Off: text jobs pass unchecked.                                              |
+| Default policy categories | Yes, each  | Off: that category no longer rejects on the workflows it covers.            |
 
 Check these before you promise the user a behaviour:
 
@@ -92,9 +101,30 @@ Check these before you promise the user a behaviour:
   account has text moderation off, say so at the step 4 checkpoint. The integration is not
   fail-closed in any useful sense until the user turns it on.
 
-`PUT /api/v1/me/moderation-config` writes the toggles. The body is the complete new state,
-so an omitted category is treated as enabled — a partial PUT silently re-enables anything
-it leaves out.
+## Default policy categories
+
+The built-in policy is split into default categories, and the account can switch each one
+off. `GET /api/v1/me/default-categories` lists the ones that can be switched, with their
+state and the workflows each applies to. It never returns the policy prompts, and it never
+lists child-safety categories — those always run.
+
+```json
+{
+  "categories": [
+    { "id": "default_<id>", "name": "…", "enabled": false, "workflows": ["text", "image", "video", "video-frame", "audio"] }
+  ]
+}
+```
+
+Read the IDs from the endpoint; do not hard-code them. A switched-off default category is
+content the account has chosen to allow. If the user expects the integration to block
+something a disabled category covers, say so at the step 4 checkpoint rather than working
+around it in code.
+
+`PUT /api/v1/me/moderation-config` writes the toggles (`account:config` scope). Allowed keys
+are `nsfw`, `text`, and the `default_*` IDs; values are booleans. The body is the complete
+new state, so an omitted key is treated as enabled — a partial PUT silently re-enables
+anything it leaves out.
 
 ## API key attribution
 

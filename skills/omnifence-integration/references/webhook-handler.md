@@ -4,6 +4,9 @@ The preferred way to receive decisions. Register a global URL once, or pass a
 `webhook_url` field on individual submissions (the per-request URL overrides the global
 one for that job).
 
+Every job sends exactly one terminal callback: a `completed` result or a `failed` notice.
+The handler must accept both — see [Payload](#payload).
+
 **Verify the signature before you act on a payload.** The webhook URL is not a secret.
 Anyone who learns it can POST a forged `"is_prohibited": false` at the endpoint and
 release content the moderation pipeline rejected. Signature verification is the only
@@ -11,6 +14,17 @@ thing that makes a callback provably ours. Build the handler in the order below 
 verification first, business logic second.
 
 ## Register the global webhook
+
+The global URL decides who receives every verdict on the account, so setting it needs the
+`webhook:manage` scope. That scope is **off by default on API keys**: an integration key
+gets `403 FORBIDDEN` here. Do not ask for the scope on the integration key. Pick one:
+
+- **The account holder sets the URL in the dashboard** under **Account → Webhooks**, where
+  the session carries the scope. This is the default recommendation.
+- **Pass `webhook_url` on every submission.** It needs no extra scope, overrides the global
+  URL for that job, and suits an integration that submits from one place.
+
+The API call, for a key that does carry `webhook:manage`:
 
 ```bash
 curl -X POST https://api.omnifence.ai/api/v1/webhook/register \
@@ -66,9 +80,9 @@ through the API:
 | `POST` | `/api/v1/me/webhook-secrets/reveal`       | Return the active secret in full.         |
 | `POST` | `/api/v1/me/webhook-secrets/rotate`       | Issue a new secret, return it.            |
 
-These three need the `webhook:manage` scope, which is **off by default on API keys**. A
-plain `moderate:*` integration key gets `403 FORBIDDEN`. That is deliberate: a key that can
-read the signing secret can forge deliveries. Ask the user to paste the secret from the
+These three need the same `webhook:manage` scope as registration, which is **off by
+default on API keys**. A plain `moderate:*` integration key gets `403 FORBIDDEN`. That is
+deliberate: a key that can read the signing secret can forge deliveries. Ask the user to paste the secret from the
 dashboard rather than requesting the scope on the integration key.
 
 ### Timestamp tolerance
@@ -95,16 +109,22 @@ the header never carries more than two signatures.
 ## Validate the payload, not just the signature
 
 A valid signature proves who sent the body. It proves nothing about what is in it.
-Release content only on an **explicit `is_prohibited: false`**, and reject anything else:
+Branch on `status` first, and release content only on a `completed` callback with an
+**explicit `is_prohibited: false`**:
 
 ```js
-status === 'completed' && typeof is_prohibited === 'boolean'
+status === 'completed' && typeof is_prohibited === 'boolean' // a decision
+status === 'failed'                                          // no decision — keep held
 ```
+
+A `failed` callback is a real, signed outcome, not a malformed body. Acknowledge it with a
+`2xx`, keep the content held, and record the `error_code`. Answering it with a `400` makes
+Omnifence redeliver it for hours, and the failure is never handled.
 
 A truthiness check fails open. `is_prohibited` is `null` on a job that has not decided
 yet, and a missing or renamed field is `undefined` — both are falsy, so `if (is_prohibited)
 … else release()` publishes rejected content the moment a wrong-status callback, a producer
-defect, or a schema change reaches the endpoint. Fail closed on an unexpected shape: leave
+defect, or a schema change reaches the endpoint. Fail closed on any other shape: leave
 the content held and let the reconciliation poll settle it.
 
 ## Deduplicate by claiming, before the side effect
@@ -124,7 +144,8 @@ well, so a replay cannot move it twice.
 
 ## Payload
 
-Omnifence POSTs a JSON body when a job completes:
+Omnifence POSTs a JSON body when a job settles. A job that reached a decision sends a
+`completed` result:
 
 ```json
 {
@@ -136,6 +157,32 @@ Omnifence POSTs a JSON body when a job completes:
   "delivery_id": "wh_a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
+
+A job that used up its retries without a decision sends a `failed` notice instead. The
+charge for it is refunded:
+
+```json
+{
+  "is_prohibited": null,
+  "error_code": "PROVIDER_RATE_LIMITED",
+  "job_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+  "status": "failed",
+  "failed_at": "2026-09-02T10:11:36.000Z",
+  "delivery_id": "wh_c3d4e5f6-a7b8-9012-cdef-123456789012"
+}
+```
+
+| Field           | Present          | Description                                                                 |
+| --------------- | ---------------- | --------------------------------------------------------------------------- |
+| `is_prohibited` | Always           | `true` rejected, `false` passed, `null` on a `failed` job.                   |
+| `job_id`        | Always           | The job this outcome belongs to.                                             |
+| `status`        | Always           | `completed` or `failed`. A job sends one of the two, never both.             |
+| `completed_at`  | On `completed`   | When the decision was made.                                                  |
+| `failed_at`     | On `failed`      | When the job failed for good.                                                |
+| `delivery_id`   | Always           | Stable across retries of this delivery — the idempotency key.                |
+| `reason`        | Rejections only  | Why the content was rejected.                                                |
+| `nsfw`          | Image/video only | Informational label, when the NSFW check is on.                              |
+| `error_code`    | `failed` only    | Why the job failed, when the pipeline knows. The values are in `polling.md`. |
 
 - `reason` is present only when `is_prohibited` is `true`. It names the policy or the
   custom category that tripped — see `account-config.md`.
@@ -168,17 +215,14 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
     return res.status(400).send('invalid signature'); // never a 2xx — do not ack a forgery
   }
 
-  const { job_id, is_prohibited, reason, delivery_id, status } = payload;
+  const { job_id, is_prohibited, reason, delivery_id, status, error_code } = payload;
 
   // The signature authenticated the sender, not the shape. Release only on an
-  // explicit boolean false — `null` (still pending), undefined, or any other type
-  // must never reach the release branch.
-  if (
-    typeof job_id !== 'string' ||
-    typeof delivery_id !== 'string' ||
-    status !== 'completed' ||
-    typeof is_prohibited !== 'boolean'
-  ) {
+  // explicit boolean false on a `completed` callback — `null`, undefined, or any
+  // other type must never reach the release branch.
+  const isDecision = status === 'completed' && typeof is_prohibited === 'boolean';
+  const isFailure = status === 'failed';
+  if (typeof job_id !== 'string' || typeof delivery_id !== 'string' || !(isDecision || isFailure)) {
     return res.status(400).send('unexpected payload'); // content stays held
   }
 
@@ -191,8 +235,12 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
   const content = await findHeldContentByJobId(job_id);
   if (!content) return res.sendStatus(200); // unknown job — ack anyway
 
-  // Guard both transitions on the content's current state so a replay is a no-op.
-  if (is_prohibited) {
+  // Guard every transition on the content's current state so a replay is a no-op.
+  if (isFailure) {
+    // No decision. The content stays held; surface it for a resubmit or an operator.
+    // error_code may be absent — never require it.
+    await markModerationFailed(content, error_code);
+  } else if (is_prohibited) {
     await markRejected(content, reason); // reason is for operators/logs only
   } else {
     await release(content); // the only path that publishes content

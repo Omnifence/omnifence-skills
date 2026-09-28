@@ -9,27 +9,21 @@ Requires the `moderate:text` scope.
 
 `multipart/form-data` fields:
 
-| Field         | Type   | Required | Description                              |
-| ------------- | ------ | -------- | ---------------------------------------- |
-| `text`        | string | Yes      | The text to moderate.                    |
-| `webhook_url` | string | No       | URL to receive the result on completion. |
+| Field         | Type   | Required | Description                                |
+| ------------- | ------ | -------- | ------------------------------------------ |
+| `text`        | string | Yes      | The text to moderate, ≤ 20,000 characters. |
+| `webhook_url` | string | No       | URL to receive the result on completion.   |
+
+Text over 20,000 characters is rejected with `400 INVALID_REQUEST` before a job is created or
+billed. Do not truncate it silently — the cut-off part would pass unchecked. Split longer text
+into chunks, submit each chunk as its own job, and release the text only when every chunk
+passes.
 
 ```js
-const form = new FormData();
-form.append('text', userPrompt);
-
-const res = await fetch('https://api.omnifence.ai/api/v1/moderate/text', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${process.env.OMNIFENCE_API_KEY}` },
-  body: form,
-});
-
-if (res.status !== 202) {
-  const err = await res.json(); // { error, message, statusCode }
-  throw new Error(`Omnifence submission failed: ${err.error} — ${err.message}`);
-}
-
-const { job_id } = await res.json(); // { job_id, status: 'queued' }
+// submitModeration() is the helper in submission-errors.md. It returns the job ID —
+// including the recovery ID of a 503 SUBMISSION_STATUS_UNKNOWN, flagged by
+// acceptanceUnknown — and throws on every other error. Store both with the held content.
+const { jobId, acceptanceUnknown } = await submitModeration('text', { text: userPrompt });
 ```
 
 ```bash

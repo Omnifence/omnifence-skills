@@ -19,21 +19,10 @@ to a private or internal network address, is rejected with `400 INVALID_REQUEST`
 presigned bucket URL works — make sure it stays valid for at least several minutes.
 
 ```js
-const form = new FormData();
-form.append('image', generatedImageUrl);
-
-const res = await fetch('https://api.omnifence.ai/api/v1/moderate/image', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${process.env.OMNIFENCE_API_KEY}` },
-  body: form,
-});
-
-if (res.status !== 202) {
-  const err = await res.json();
-  throw new Error(`Omnifence submission failed: ${err.error} — ${err.message}`);
-}
-
-const { job_id } = await res.json();
+// submitModeration() is the helper in submission-errors.md. It returns the job ID —
+// including the recovery ID of a 503 SUBMISSION_STATUS_UNKNOWN, flagged by
+// acceptanceUnknown — and throws on every other error. Store both with the held content.
+const { jobId, acceptanceUnknown } = await submitModeration('image', { image: generatedImageUrl });
 ```
 
 ```bash
