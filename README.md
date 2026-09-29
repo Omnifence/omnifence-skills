@@ -1,6 +1,6 @@
 # Omnifence agent skills
 
-Claude Code skills for integrating the [Omnifence](https://docs.omnifence.ai) content
+AI agent skills for integrating the [Omnifence](https://docs.omnifence.ai) content
 moderation API.
 
 ## Install
