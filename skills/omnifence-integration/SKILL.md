@@ -241,6 +241,14 @@ Scopes: each endpoint requires its scope — `moderate:text`, `moderate:image`,
 `moderate:video`, `moderate:audio`; reading a job requires `job:read`. A missing scope
 returns `403 FORBIDDEN`.
 
+The Shared Registry scopes, `registry:check` and `registry:submit`, belong to a separate
+product: the industry banned-user registry (`POST /api/v1/registry/check`,
+`/api/v1/registry/entries`). Omnifence issues them only on a dedicated registry key to
+vetted members, and a moderation integration needs neither. Do not add registry calls
+unless the user asks for them and already holds a registry key; if they do, follow
+https://docs.omnifence.ai/registry/overview, and never send a plaintext email to the
+registry.
+
 Error handling (full table and a submit helper in `references/submission-errors.md`):
 
 - **Retry later:** `429 RATE_LIMITED` (wait `retry-after`), `500 INTERNAL_ERROR`, and
