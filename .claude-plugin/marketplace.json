@@ -5,13 +5,15 @@
     "email": "support@omnifence.ai"
   },
   "metadata": {
-    "description": "Agent skills for integrating the Omnifence content moderation API",
-    "version": "0.1.0"
+    "description": "Agent skills for integrating Omnifence: content moderation, and the Shared Registry for members",
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "omnifence-integration",
       "source": "./",
+      "strict": false,
+      "skills": ["./skills/omnifence-integration"],
       "version": "0.5.0",
       "description": "Helps you integrate Omnifence content moderation into your app, for text, images, audio, and video.",
       "author": {
@@ -20,6 +22,20 @@
       },
       "homepage": "https://docs.omnifence.ai",
       "keywords": ["moderation", "content-moderation", "trust-and-safety", "omnifence"]
+    },
+    {
+      "name": "omnifence-registry",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/omnifence-registry"],
+      "version": "0.1.0",
+      "description": "For Shared Registry members only: check sign-ups against the cross-platform banned-user list, and report and revoke bans. Not content moderation.",
+      "author": {
+        "name": "Omnifence",
+        "email": "support@omnifence.ai"
+      },
+      "homepage": "https://docs.omnifence.ai/registry/overview",
+      "keywords": ["shared-registry", "trust-and-safety", "fraud", "ban-evasion", "omnifence"]
     }
   ]
 }

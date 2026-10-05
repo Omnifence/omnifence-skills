@@ -22,9 +22,10 @@
  * repo's docs/ directory> to check against unpublished `.mdx` sources.
  */
 
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILLS_DIR = join(ROOT, 'skills');
@@ -64,6 +65,21 @@ const REQUIRED_FIELDS = [
   ...['text', 'image', 'video', 'audio'].map((m) => ({
     path: `/api/v1/moderate/${m}`, method: 'post', status: '503', fields: ['job_id'],
   })),
+  // Shared Registry (skills/omnifence-registry).
+  { path: '/api/v1/registry/check', method: 'post', status: '200', fields: ['match', 'signals', 'normalisation_version'] },
+  ...['200', '201'].map((status) => ({
+    path: '/api/v1/registry/entries', method: 'post', status, fields: ['entry_id', 'status', 'member_case_ref', 'expires_at'],
+  })),
+  { path: '/api/v1/registry/entries', method: 'get', status: '200', fields: ['entries', 'next_cursor'] },
+  { path: '/api/v1/registry/entries/{id}/revoke', method: 'post', status: '200', fields: ['entry_id', 'status', 'revoked_at'] },
+];
+
+/** Fields of each item in a response array the skill reads (`signals[]`). */
+const REQUIRED_ITEM_FIELDS = [
+  {
+    path: '/api/v1/registry/check', method: 'post', status: '200', array: 'signals',
+    fields: ['category', 'reporter_count', 'first_reported_at', 'last_reported_at', 'automated_refusal_permitted'],
+  },
 ];
 
 /** Response statuses the skill tells an integration to handle. */
@@ -72,11 +88,22 @@ const REQUIRED_STATUSES = [
   { path: '/api/v1/moderate/text', method: 'post', statuses: ['202', '503'] },
   { path: '/api/v1/moderate/image', method: 'post', statuses: ['202', '503'] },
   { path: '/api/v1/moderate/audio', method: 'post', statuses: ['202', '503'] },
+  { path: '/api/v1/registry/entries', method: 'post', statuses: ['200', '201'] },
 ];
 
 /** Enum values the skill branches on. */
 const REQUIRED_ENUMS = [
   { path: '/api/v1/job/{id}', method: 'get', status: '200', field: 'status', values: ['queued', 'processing', 'completed', 'failed'] },
+  { path: '/api/v1/registry/entries', method: 'post', status: '201', field: 'status', values: ['active', 'disputed', 'revoked', 'expired'] },
+];
+
+/**
+ * Request-body enums the registry skill sends. Both directions: a new category
+ * or context is a contract change the skill must describe before members use it.
+ */
+const REQUIRED_REQUEST_ENUMS = [
+  { path: '/api/v1/registry/check', method: 'post', field: 'context', values: ['signup', 'login', 'periodic'] },
+  { path: '/api/v1/registry/entries', method: 'post', field: 'category', values: ['payment_fraud', 'prohibited_content', 'ban_evasion'] },
 ];
 
 /**
@@ -128,6 +155,7 @@ const NOT_A_CODE = /^OMNIFENCE_/;
 const REQUIRED_PARAMS = [
   { path: '/api/v1/jobs', method: 'get', params: ['status'] },
   { path: '/api/v1/jobs/export', method: 'get', params: ['from', 'to'] },
+  { path: '/api/v1/registry/entries', method: 'get', params: ['limit', 'cursor', 'status'] },
 ];
 
 async function loadSpec() {
@@ -319,12 +347,43 @@ for (const check of REQUIRED_ENUMS) {
   }
 }
 
+for (const check of REQUIRED_ITEM_FIELDS) {
+  const items = schemaProperties(spec, check)?.[check.array]?.items?.properties;
+  if (!items) {
+    errors.push(`spec: no item schema for "${check.array}" on ${check.method.toUpperCase()} ${check.path} ${check.status}`);
+    continue;
+  }
+  for (const field of check.fields) {
+    if (!(field in items)) {
+      errors.push(`spec: field "${check.array}[].${field}" missing from ${check.method.toUpperCase()} ${check.path} ${check.status} response`);
+    }
+  }
+}
+
+for (const check of REQUIRED_REQUEST_ENUMS) {
+  const values = spec.paths?.[check.path]?.[check.method]?.requestBody?.content?.['application/json']?.schema?.properties?.[check.field]?.enum;
+  if (!Array.isArray(values)) {
+    errors.push(`spec: no request enum for "${check.field}" on ${check.method.toUpperCase()} ${check.path}`);
+    continue;
+  }
+  for (const v of values) {
+    if (!check.values.includes(v)) {
+      errors.push(`spec: request "${check.field}" on ${check.method.toUpperCase()} ${check.path} gained the value "${v}" the skill does not describe`);
+    }
+  }
+  for (const v of check.values) {
+    if (!values.includes(v)) {
+      errors.push(`spec: request "${check.field}" on ${check.method.toUpperCase()} ${check.path} lost the value "${v}" the skill sends`);
+    }
+  }
+}
+
 // --- Docs-page checks -------------------------------------------------------
 
-const skillFile = (name) => {
-  const hit = files.find((f) => f.path.endsWith(`/omnifence-integration/${name}`));
+const skillFile = (name, skill = 'omnifence-integration') => {
+  const hit = files.find((f) => f.path.endsWith(`/${skill}/${name}`));
   if (!hit) {
-    errors.push(`${name}: the file the drift check reads is missing`);
+    errors.push(`${skill}/${name}: the file the drift check reads is missing`);
     return '';
   }
   return hit.text;
@@ -334,7 +393,16 @@ const normalise = (n) => n.replace(/,/g, '');
 
 const docs = Object.fromEntries(
   await Promise.all(
-    ['errors', 'platform/error-recovery', 'platform/webhooks', 'authentication', 'api-reference/endpoint/text-moderate'].map(
+    [
+      'errors',
+      'platform/error-recovery',
+      'platform/webhooks',
+      'authentication',
+      'api-reference/endpoint/text-moderate',
+      'registry/errors',
+      'registry/categories',
+      'registry/hashing',
+    ].map(
       async (page) => [page, await loadDoc(page)],
     ),
   ),
@@ -404,6 +472,73 @@ for (const scope of docScopes) {
 for (const scope of backtickedScopes(allSkillText)) {
   if (docScopes.size > 0 && !docScopes.has(scope)) {
     errors.push(`skill: names the scope ${scope}, which the docs no longer list`);
+  }
+}
+
+// --- Shared Registry --------------------------------------------------------
+
+// Categories: the docs table and the registry skill must name the same set.
+const registrySkill = skillFile('SKILL.md', 'omnifence-registry');
+const docCategories = tableKeys(docs['registry/categories']).filter((k) => /^[a-z_]+$/.test(k));
+if (docCategories.length === 0) errors.push('docs: no category table found on registry/categories');
+for (const category of docCategories) {
+  if (!registrySkill.includes(`\`${category}\``)) {
+    errors.push(`omnifence-registry/SKILL.md: the category ${category} is documented but the skill never names it`);
+  }
+}
+for (const category of REQUIRED_REQUEST_ENUMS.find((c) => c.field === 'category').values) {
+  if (docCategories.length > 0 && !docCategories.includes(category)) {
+    errors.push(`docs: registry/categories no longer lists the category ${category} the skill reports`);
+  }
+}
+
+/** Rows of the hashing test-vector table: [input, normalised | null, sha256 | null]. */
+function hashingVectors(text) {
+  const rows = [];
+  for (const line of text.split('\n')) {
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.length !== 3 || !cells[0].startsWith('`')) continue;
+    const unquote = (c) => (c.startsWith('`') ? c.slice(1, -1) : null);
+    rows.push([unquote(cells[0]).replaceAll('\u2420', ' '), unquote(cells[1]), unquote(cells[2])]);
+  }
+  return rows;
+}
+
+// Hashing: the skill's vector table must equal the published one, and the
+// skill's reference implementation must reproduce every published vector. A
+// wrong copy here would make a member's reports match nobody.
+const hashingRef = skillFile('references/hashing.md', 'omnifence-registry');
+const docVectors = hashingVectors(docs['registry/hashing']);
+const skillVectors = hashingVectors(hashingRef);
+if (docVectors.length === 0) errors.push('docs: no test-vector table found on registry/hashing');
+if (JSON.stringify(skillVectors) !== JSON.stringify(docVectors)) {
+  errors.push('omnifence-registry/references/hashing.md: the test vectors differ from registry/hashing');
+}
+const docVersion = docs['registry/hashing'].match(/The rules on this page are version `(\d+)`/)?.[1];
+if (!docVersion) errors.push('docs: registry/hashing no longer states the normalisation version');
+else if (!hashingRef.includes(`normalisation version \`${docVersion}\``)) {
+  errors.push(`omnifence-registry/references/hashing.md: does not state normalisation version ${docVersion}`);
+}
+const implementation = hashingRef.match(/```javascript\n([\s\S]*?export function registryDigest[\s\S]*?)```/)?.[1];
+if (!implementation) {
+  errors.push('omnifence-registry/references/hashing.md: no reference implementation found');
+} else if (docVectors.length > 0) {
+  const dir = await mkdtemp(join(tmpdir(), 'omnifence-hash-'));
+  try {
+    const file = join(dir, 'registry-hash.mjs');
+    await writeFile(file, implementation);
+    const { normaliseEmail, registryDigest } = await import(pathToFileURL(file).href);
+    for (const [input, normalised, sha256] of docVectors) {
+      const gotNormalised = normaliseEmail(input);
+      const gotDigest = registryDigest(input);
+      if (gotNormalised !== normalised || gotDigest !== sha256) {
+        errors.push(
+          `omnifence-registry/references/hashing.md: ${JSON.stringify(input)} gives ${gotNormalised} / ${gotDigest}; the docs say ${normalised} / ${sha256}`,
+        );
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 

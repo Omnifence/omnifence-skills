@@ -8,7 +8,9 @@ description: >-
   or NSFW violations before it reaches end users, even if they never say "Omnifence" or
   "moderation". Finds generation call sites (third-party APIs or in-house platforms),
   confirms them with the user, then wires POST /api/v1/moderate/{text,image,video,audio}
-  with async job handling.
+  with async job handling. Not for the Shared Registry banned-user list (checking sign-ups
+  or reporting banned users), which is a separate product with its own skill,
+  omnifence-registry.
 ---
 
 # Omnifence integration
@@ -19,6 +21,10 @@ receives a pass/reject decision as an asynchronous job result.
 
 Your task: find every place this codebase generates content, confirm the list with the
 user, and insert a moderation step at each confirmed site.
+
+This skill covers content moderation only. It never adds the Omnifence Shared Registry
+(the banned-user list for sign-ups), which is a separate product with its own skill,
+`omnifence-registry`.
 
 Base URL: `https://api.omnifence.ai`. Auth: `Authorization: Bearer <API key>` on every
 request. There is no SDK — use plain HTTP (`fetch` examples in `references/`).
@@ -241,13 +247,12 @@ Scopes: each endpoint requires its scope — `moderate:text`, `moderate:image`,
 `moderate:video`, `moderate:audio`; reading a job requires `job:read`. A missing scope
 returns `403 FORBIDDEN`.
 
-The Shared Registry scopes, `registry:check` and `registry:submit`, belong to a separate
-product: the industry banned-user registry (`POST /api/v1/registry/check`,
-`/api/v1/registry/entries`). Omnifence issues them only on a dedicated registry key to
-vetted members, and a moderation integration needs neither. Do not add registry calls
-unless the user asks for them and already holds a registry key; if they do, follow
-https://docs.omnifence.ai/registry/overview, and never send a plaintext email to the
-registry.
+**The Shared Registry is not moderation.** The scopes `registry:check` and `registry:submit`
+belong to a separate product, the industry banned-user registry, with its own vetted membership and
+its own key. A moderation integration never calls `/api/v1/registry/check` or
+`/api/v1/registry/entries`, and an Omnifence rejection is never a reason to report a user there.
+Never add registry calls as part of this skill. If the user explicitly asks for the Shared Registry,
+use the separate `omnifence-registry` skill (install `omnifence-registry@omnifence-skills`).
 
 Error handling (full table and a submit helper in `references/submission-errors.md`):
 
