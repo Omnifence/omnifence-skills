@@ -25,6 +25,11 @@ first. Two need their own handling: `503 SUBMISSION_STATUS_UNKNOWN` (the job may
 | `503`  | `SERVICE_UNAVAILABLE`       | Intake is busy, or a dependency is down.                                                 | Wait at least `retry-after` seconds when it is sent, then retry with backoff and jitter.        |
 | `503`  | `SUBMISSION_STATUS_UNKNOWN` | The API could not confirm whether it accepted the job. The body carries a `job_id`.      | **Do not resubmit.** Poll that `job_id` first — see below.                                      |
 
+The text batch endpoint adds its own `400` codes — `BATCH_EMPTY`, `BATCH_TOO_LARGE`,
+`DUPLICATE_ITEM_KEY`, `TEXT_TOO_LONG` — and answers `SUBMISSION_STATUS_UNKNOWN` with a
+`batch_id` instead of a `job_id`. Reading an unknown batch returns `404 BATCH_NOT_FOUND`.
+All of them are in `moderate-text-batch.md`.
+
 `415`, `422`, and a media-size `413` come from a probe of the media URL at submission time
 (video today).
 The same `MEDIA_UNREACHABLE` and `UNSUPPORTED_MEDIA` can also arrive later as the

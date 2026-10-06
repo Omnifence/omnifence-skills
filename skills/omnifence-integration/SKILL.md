@@ -150,6 +150,7 @@ Only after the user approves do you write code, and only for the approved sites 
 | --- | --- | --- |
 | User-written generation prompt (moderate **before** the generation call) | `POST /api/v1/moderate/text` | `text` (≤ 20,000 characters) |
 | AI-character chat turn — the user message, and optionally the model reply | `POST /api/v1/moderate/text` | `text` (≤ 20,000 characters) |
+| Several texts from one user action that each need their own decision — the fields of a character or profile form | `POST /api/v1/moderate/text/batch` | JSON `items[]` of `{ key, text }`, 1 to 99 items |
 | Generated image | `POST /api/v1/moderate/image` | `image` (publicly reachable HTTPS URL, ≤ 10 MB) |
 | Generated video | `POST /api/v1/moderate/video` | `video` (publicly reachable HTTPS URL of an MP4, WebM or QuickTime file, ≤ 100 MB) |
 | Generated audio | `POST /api/v1/moderate/audio` | `audio` (publicly reachable HTTPS URL, ≤ 100 MB, ≤ 30 minutes) |
@@ -162,8 +163,17 @@ Direct file parts (`image_file`, `video_file`, `audio_file`) exist but are disab
 default per deployment; build on the URL contract unless the user confirms uploads are
 enabled for their account.
 
-All submissions are `multipart/form-data`. Every submission accepts an optional
-`webhook_url` field that overrides the account's global webhook for that job.
+All single submissions are `multipart/form-data`; the text batch endpoint takes a JSON
+body. Every submission accepts an optional `webhook_url` field that overrides the account's
+global webhook for that job or batch.
+
+**Batch the texts of one action.** When one save produces several texts that each need a
+decision — a form with many free-text fields — send them in one
+`POST /api/v1/moderate/text/batch` with the field name as each item's `key`. One batch
+request counts as one request against the rate limit, and the batch sends one webhook with
+every item's decision. One `/moderate/text` call per field, plus a poll per job, runs into
+`429 RATE_LIMITED` under real traffic. Never join the fields into one text instead: one
+combined decision cannot say which field to mark. See `references/moderate-text-batch.md`.
 
 Text over 20,000 characters is rejected, not truncated. Split longer text into chunks,
 submit each as its own job, and release the text only when every chunk passes. Never cut
@@ -178,6 +188,7 @@ configuration — custom categories, the NSFW and text toggles, and API key attr
 Read `references/account-config.md` before writing code that branches on a decision.
 
 Per-endpoint request/response examples: `references/moderate-text.md`,
+`references/moderate-text-batch.md`,
 `references/moderate-image.md`, `references/moderate-video.md`,
 `references/moderate-audio.md`. They share one submit helper, in
 `references/submission-errors.md`.
@@ -209,6 +220,10 @@ The decision arrives later, one of two ways:
    `total`, or you silently drop every job past the first page) or `GET /api/v1/job/{id}`. Pace polling on the `x-ratelimit-limit`,
    `x-ratelimit-remaining`, and `x-ratelimit-reset` response headers, and honour
    `retry-after` on a `429` — never guess the limit. See `references/polling.md`.
+
+A text batch returns `202` with a `batch_id` and one `job_id` per item, and sends one
+webhook with `type: "text_batch"` when every item has settled. A handler that receives both
+kinds must branch on `type` first: a job webhook has no `type` field.
 
 A chain crosses this boundary once per layer. A webhook for layer 1 is what starts
 generation and layer 2; the request stays held between the two.
@@ -260,12 +275,15 @@ Error handling (full table and a submit helper in `references/submission-errors.
   `503 SERVICE_UNAVAILABLE` (wait at least `retry-after` when sent, then back off with
   jitter).
 - **Stop and fix:** `400 INVALID_REQUEST` (bad field, text over the limit, private or
-  non-HTTP URL), `401 UNAUTHORIZED`, `402 PAYMENT_REQUIRED` (account out of credit),
+  non-HTTP URL), the text batch refusals `400 BATCH_EMPTY`, `400 BATCH_TOO_LARGE`,
+  `400 DUPLICATE_ITEM_KEY` and `400 TEXT_TOO_LONG` (nothing was accepted or charged), `401 UNAUTHORIZED`, `402 PAYMENT_REQUIRED` (account out of credit),
   `403 FORBIDDEN` (missing scope), `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA` and
   `422 MEDIA_UNREACHABLE` (the media URL — the same URL fails the same way every time).
 - **`503 SUBMISSION_STATUS_UNKNOWN`:** the job may exist. The body carries its `job_id`.
   Hold the content against that ID and poll it; resubmit only if it returns
-  `404 JOB_NOT_FOUND`. Resubmitting blindly can bill the same content twice.
+  `404 JOB_NOT_FOUND`. Resubmitting blindly can bill the same content twice. For a text
+  batch the body carries a `batch_id`: read the batch, and resubmit only on
+  `404 BATCH_NOT_FOUND`.
 - **End the loop:** `403 ACCOUNT_TERMINATED` (not recoverable through the API — stop and
   alert an operator) and `404 JOB_NOT_FOUND` on a poll (a poll loop must stop, not spin to
   its timeout).
@@ -287,7 +305,9 @@ agreed in step 3.
   `failed` body → `2xx`, content held and marked failed; a replayed `delivery_id` →
   acknowledged twice, released once. Cover submission too: a `503
   SUBMISSION_STATUS_UNKNOWN` → the returned `job_id` is stored and no second job is
-  submitted; a `413`/`415`/`422` → no retry of the same URL.
+  submitted; a `413`/`415`/`422` → no retry of the same URL. At a batched form, cover one
+  rejected field → only that field is marked and the save is refused, and one failed item →
+  the form stays held.
 - **Never touch `/api/v1/admin/*`.** Those routes are for Omnifence operators, not for
   integrations. Do not call them, document them, or store credentials for them.
 - **One API key per approved call site.** Jobs record the key they were submitted with

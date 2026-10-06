@@ -97,12 +97,24 @@ surfaces to an operator instead of looping.
 | `403 ACCOUNT_TERMINATED`  | The account is terminated. Not recoverable through the API.     | Stop polling and every submission. Alert an operator.|
 | `403 FORBIDDEN`           | The key is missing the `job:read` scope.                        | Stop polling. Fix the key.                           |
 | `402 PAYMENT_REQUIRED`    | The account credit balance is at or below zero.                 | Stop submitting. Held jobs still complete.           |
+| `404 BATCH_NOT_FOUND`     | The text batch ID does not exist, or belongs to another account. | Stop reading it. The form stays held. Alert an operator. |
 
 Retrying any of these wastes the same rate-limit budget the submission path needs.
 
 One exception: a job ID stored from a `503 SUBMISSION_STATUS_UNKNOWN` response
 (`acceptanceUnknown: true`) that returns `404 JOB_NOT_FOUND` was never accepted. Resubmit
 it once — see `submission-errors.md`.
+
+## Text batches
+
+A text batch (`moderate-text-batch.md`) is reconciled with one read,
+`GET /api/v1/moderate/text/batch/{batch_id}`, not with one poll per item. It returns every
+item's decision; release the form only when the batch `status` is `completed` and every item
+has `is_prohibited: false`. Its items are also ordinary jobs, so they appear in
+`GET /api/v1/jobs?status=queued,processing` like any other job.
+
+A batch ID stored from a `503 SUBMISSION_STATUS_UNKNOWN` that returns `404 BATCH_NOT_FOUND`
+was never accepted. Resubmit it once.
 
 ## Reconciling a whole batch
 
