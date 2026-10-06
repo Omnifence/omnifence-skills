@@ -65,6 +65,12 @@ const REQUIRED_FIELDS = [
   ...['text', 'image', 'video', 'audio'].map((m) => ({
     path: `/api/v1/moderate/${m}`, method: 'post', status: '503', fields: ['job_id'],
   })),
+  // Text batch (references/moderate-text-batch.md): the accepted batch, its recovery
+  // `batch_id`, the batch read, and the batch fields a job read names.
+  { path: '/api/v1/moderate/text/batch', method: 'post', status: '202', fields: ['batch_id', 'status', 'items'] },
+  { path: '/api/v1/moderate/text/batch', method: 'post', status: '503', fields: ['batch_id'] },
+  { path: '/api/v1/moderate/text/batch/{batch_id}', method: 'get', status: '200', fields: ['type', 'batch_id', 'status', 'completed_at', 'items'] },
+  { path: '/api/v1/job/{id}', method: 'get', status: '200', fields: ['batch_id', 'batch_key'] },
   // Shared Registry (skills/omnifence-registry).
   { path: '/api/v1/registry/check', method: 'post', status: '200', fields: ['match', 'signals', 'normalisation_version'] },
   ...['200', '201'].map((status) => ({
@@ -77,6 +83,14 @@ const REQUIRED_FIELDS = [
 /** Fields of each item in a response array the skill reads (`signals[]`). */
 const REQUIRED_ITEM_FIELDS = [
   {
+    path: '/api/v1/moderate/text/batch', method: 'post', status: '202', array: 'items',
+    fields: ['key', 'job_id'],
+  },
+  {
+    path: '/api/v1/moderate/text/batch/{batch_id}', method: 'get', status: '200', array: 'items',
+    fields: ['key', 'job_id', 'status', 'is_prohibited', 'reason', 'error_code'],
+  },
+  {
     path: '/api/v1/registry/check', method: 'post', status: '200', array: 'signals',
     fields: ['category', 'reporter_count', 'first_reported_at', 'last_reported_at', 'automated_refusal_permitted'],
   },
@@ -88,12 +102,14 @@ const REQUIRED_STATUSES = [
   { path: '/api/v1/moderate/text', method: 'post', statuses: ['202', '503'] },
   { path: '/api/v1/moderate/image', method: 'post', statuses: ['202', '503'] },
   { path: '/api/v1/moderate/audio', method: 'post', statuses: ['202', '503'] },
+  { path: '/api/v1/moderate/text/batch', method: 'post', statuses: ['202', '503'] },
   { path: '/api/v1/registry/entries', method: 'post', statuses: ['200', '201'] },
 ];
 
 /** Enum values the skill branches on. */
 const REQUIRED_ENUMS = [
   { path: '/api/v1/job/{id}', method: 'get', status: '200', field: 'status', values: ['queued', 'processing', 'completed', 'failed'] },
+  { path: '/api/v1/moderate/text/batch/{batch_id}', method: 'get', status: '200', field: 'status', values: ['processing', 'completed'] },
   { path: '/api/v1/registry/entries', method: 'post', status: '201', field: 'status', values: ['active', 'disputed', 'revoked', 'expired'] },
 ];
 

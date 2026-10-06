@@ -188,9 +188,13 @@ charge for it is refunded:
   custom category that tripped — see `account-config.md`.
 - `nsfw` appears only on image/video jobs with the NSFW check enabled; it is
   informational and never a rejection by itself.
-- There is no `type` field in the payload — match `job_id` against the job IDs stored at
+- There is no `type` field in a job payload — match `job_id` against the job IDs stored at
   submission time to know which content the decision belongs to. (`GET /api/v1/job/{id}`
   does return `type`.)
+- A **text batch** sends one webhook of its own shape, with `type: "text_batch"`, a
+  `batch_id`, and an `items` array with one decision per `key`. Its items send no job
+  webhook. Branch on `type` before any other check — see below and
+  `moderate-text-batch.md`.
 - `delivery_id` is stable across retries of the same result — use it to deduplicate
   redeliveries.
 
@@ -213,6 +217,11 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
     payload = wh.verify(req.body, req.headers); // throws on a bad or stale signature
   } catch {
     return res.status(400).send('invalid signature'); // never a 2xx — do not ack a forgery
+  }
+
+  // A text batch: one webhook for every item. A job webhook has no `type`.
+  if (payload.type === 'text_batch') {
+    return handleBatch(payload, res);
   }
 
   const { job_id, is_prohibited, reason, delivery_id, status, error_code } = payload;
@@ -248,6 +257,43 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
 
   res.sendStatus(200);
 });
+```
+
+For a batch, apply the same rules to every item, then decide the form once:
+
+```js
+async function handleBatch(payload, res) {
+  const { batch_id, delivery_id, status, items } = payload;
+  if (
+    typeof batch_id !== 'string' ||
+    typeof delivery_id !== 'string' ||
+    status !== 'completed' ||
+    !Array.isArray(items)
+  ) {
+    return res.status(400).send('unexpected payload'); // the form stays held
+  }
+  if (!(await claimDelivery(delivery_id))) return res.sendStatus(200);
+
+  const form = await findHeldFormByBatchId(batch_id);
+  if (!form) return res.sendStatus(200);
+
+  // Match by key, never by position. A field with no item stays held.
+  const byKey = new Map(items.map((item) => [item.key, item]));
+  const rejected = [];
+  let undecided = false;
+  for (const key of form.moderatedKeys) {
+    const item = byKey.get(key);
+    if (item?.status === 'completed' && item.is_prohibited === false) continue;
+    if (item?.status === 'completed' && item.is_prohibited === true) rejected.push(key);
+    else undecided = true; // failed, missing, or malformed: no decision
+  }
+
+  if (rejected.length > 0) await rejectForm(form, rejected); // mark these fields
+  else if (undecided) await markModerationFailed(form);      // held, fail closed
+  else await releaseForm(form);                              // every field passed
+
+  res.sendStatus(200);
+}
 ```
 
 Libraries exist for Python, Go, Rust, Java, Kotlin, Ruby, PHP, C# and Elixir. Match the
