@@ -79,7 +79,7 @@ fix the request, do not retry it unchanged. The message names the item.
 | `400`  | `DUPLICATE_ITEM_KEY` | Two items share a `key`.                                                |
 | `400`  | `TEXT_TOO_LONG`      | An item's `text` is over 20,000 characters. Split it into chunk items (`backstory.1`, `backstory.2`) and fail the field if any chunk is rejected. |
 | `400`  | `INVALID_REQUEST`    | Not JSON, `items` missing, or a `key`/`text` invalid or empty.          |
-| `402`  | `PAYMENT_REQUIRED`   | The balance does not cover every item. No item was accepted.            |
+| `402`  | `PAYMENT_REQUIRED`   | The balance is at or below zero (with fixed pricing: does not cover every item). No item was accepted. |
 
 `429`, `500`, `503 SERVICE_UNAVAILABLE` and the other codes behave as in
 `submission-errors.md`.
