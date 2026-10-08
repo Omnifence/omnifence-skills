@@ -84,7 +84,7 @@ treat an absent or unknown code as "resubmit once, then surface to an operator".
 | `MODEL_UNAVAILABLE`     | The configured model is not served for this input.                   | Resubmit after a short delay.                                 |
 | `MODEL_REFUSED`         | The model refused this exact input.                                  | Do not resubmit it unchanged. Handle as undecidable.          |
 | `MEDIA_UNREACHABLE`     | The media URL did not resolve when fetched (404, expired signed URL). | Do not resubmit the same URL. Mint a fresh URL, then resubmit. |
-| `UNSUPPORTED_MEDIA`     | The media could not be opened (a manifest, an unreadable container). | Do not resubmit the same URL. Submit a direct MP4/WebM/QuickTime file. |
+| `UNSUPPORTED_MEDIA`     | The media could not be opened (a manifest, an unreadable container), or no frames could be sampled from it (one still image over a long audio track). | Do not resubmit the same URL. Submit a direct MP4/WebM/QuickTime file that contains moving video. |
 
 Cap automatic resubmission — one or two attempts — so a persistent provider outage
 surfaces to an operator instead of looping.
