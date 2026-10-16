@@ -5,7 +5,9 @@ generation, before the audio is published. The clip is transcribed, and the tran
 runs through the same keyword blocklist and LLM prohibition check as text moderation.
 
 This moderates **transcribed speech** only — music, sound effects, and other non-verbal
-audio are not classified. The transcript is never stored and never returned.
+audio are not classified. A clip with no speech in it (music without words, sound effects,
+noise or silence) completes with `is_prohibited: false`; it does not fail, so treat it like
+any other pass. The transcript is never stored and never returned.
 
 Requires the `moderate:audio` scope.
 
