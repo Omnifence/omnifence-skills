@@ -74,7 +74,8 @@ stays held. The charge is refunded, and the job ID cannot be retried — a resub
 new job. The same outcome arrives as a `failed` webhook when the job has one.
 
 `error_code` says why, when the pipeline knows. It is optional: never require it, and
-treat an absent or unknown code as "resubmit once, then surface to an operator".
+treat an absent or unknown code as "resubmit once, then surface to an operator". A
+`completed` job never carries one, also when it succeeded after an internal retry.
 
 | `error_code`            | Meaning                                                              | Action                                                        |
 | ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
