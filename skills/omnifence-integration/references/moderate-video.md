@@ -31,6 +31,12 @@ Streaming manifests are never accepted. If the generator produces HLS or DASH ou
 where it writes a single MP4 rendition and submit that. None of these three succeeds on a
 retry of the same URL — see `submission-errors.md`.
 
+Serve the file with a video `Content-Type` (`video/mp4`, `video/webm` or `video/quicktime`).
+The API accepts a URL that serves an untyped `application/octet-stream`, but the video
+model does not fetch it, and the job fails with `error_code` `UNSUPPORTED_MEDIA`. When the
+generator uploads to an object store (Google Cloud Storage, S3), set the content type on
+the object at upload.
+
 ```js
 // submitModeration() is the helper in submission-errors.md. It returns the job ID —
 // including the recovery ID of a 503 SUBMISSION_STATUS_UNKNOWN, flagged by
