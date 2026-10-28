@@ -23,14 +23,14 @@ a separate API key. A moderation integration never calls it, and this skill neve
 calls. If the user asked for moderation, stop and use the `omnifence-integration` skill instead.
 
 Base URL: `https://api.omnifence.ai`. Auth: `Authorization: Bearer <registry key>`. There is no SDK.
-Full docs: https://docs.omnifence.ai/registry/overview
+Full docs: https://omnifence.ai/docs/registry/overview
 
 ## Step 0 — Confirm membership and key
 
 Ask the user before you write any code:
 
 1. Is their organisation an **active Shared Registry member**? Membership is by vetting and a signed
-   agreement (https://docs.omnifence.ai/registry/membership). A moderation customer is not a member
+   agreement (https://omnifence.ai/docs/registry/membership). A moderation customer is not a member
    automatically.
 2. Do they hold a **registry key**, and which scopes does it carry: `registry:check`,
    `registry:submit`, or both? Omnifence issues these scopes only on a dedicated registry key. A
@@ -112,7 +112,7 @@ The registry uses the standard error body `{ "error", "message", "statusCode" }`
 | 429    | `RATE_LIMITED`        | Daily check quota (no `retry-after`) or the rate limit (wait `retry-after`). Checks fail open; reports retry later.         |
 | 503    | `SERVICE_UNAVAILABLE` | The registry cannot answer. Checks fail open; reports retry with backoff.                                                   |
 
-Full table: https://docs.omnifence.ai/registry/errors
+Full table: https://omnifence.ai/docs/registry/errors
 
 ## Before you finish
 

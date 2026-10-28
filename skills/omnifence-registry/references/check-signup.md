@@ -1,6 +1,6 @@
 # Check a sign-up against the Shared Registry
 
-Source: https://docs.omnifence.ai/registry/checking
+Source: https://omnifence.ai/docs/registry/checking
 
 `POST /api/v1/registry/check` needs a key with the `registry:check` scope and an active membership.
 
@@ -131,4 +131,4 @@ carries `retry-after`.
 - Never tell the user that they are in the registry, which category matched, or how many platforms
   reported them. Show the application's normal message for a refused or held account.
 - Give a refused or held user the application's usual route to contest the decision. A user who asks
-  what the registry holds about them goes to https://docs.omnifence.ai/registry/disputes.
+  what the registry holds about them goes to https://omnifence.ai/docs/registry/disputes.

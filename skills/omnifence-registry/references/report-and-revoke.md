@@ -1,6 +1,6 @@
 # Report a banned user, list reports, and revoke a report
 
-Source: https://docs.omnifence.ai/registry/reporting
+Source: https://omnifence.ai/docs/registry/reporting
 
 All three endpoints need a key with the `registry:submit` scope and an active membership.
 

@@ -2,7 +2,7 @@
 
 Every member must turn an email into exactly the same digest, or the registry cannot match a user
 across platforms. This file copies normalisation version `1` from
-https://docs.omnifence.ai/registry/hashing. The drift check runs the implementation below against the
+https://omnifence.ai/docs/registry/hashing. The drift check runs the implementation below against the
 published test vectors, so this copy cannot silently disagree with the docs.
 
 Put this in **one** module (for example `registry-hash.mjs`) and use it for every check and every

@@ -15,7 +15,7 @@
  * old check passed for a month while the webhook contract and the video limit
  * changed underneath the skill.
  *
- * Spec source: https://docs.omnifence.ai/api-reference/openapi.json
+ * Spec source: https://omnifence.ai/docs/api-reference/openapi.json
  * (exported by the API repo's `yarn export:openapi`, hosted by the docs site).
  * Docs source: the same site's raw markdown (`<page>.md`).
  * Local runs: SPEC_URL=<url or file> and DOCS_URL=<url>, or DOCS_DIR=<the API
@@ -29,8 +29,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILLS_DIR = join(ROOT, 'skills');
-const SPEC_URL = process.env.SPEC_URL ?? 'https://docs.omnifence.ai/api-reference/openapi.json';
-const DOCS_URL = (process.env.DOCS_URL ?? 'https://docs.omnifence.ai').replace(/\/$/, '');
+const SPEC_URL = process.env.SPEC_URL ?? 'https://omnifence.ai/docs/api-reference/openapi.json';
+const DOCS_URL = (process.env.DOCS_URL ?? 'https://omnifence.ai/docs').replace(/\/$/, '');
 const DOCS_DIR = process.env.DOCS_DIR;
 
 /** Retired endpoints and their scopes/slugs. Their reappearance anywhere in the
