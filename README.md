@@ -1,12 +1,12 @@
 # Omnifence agent skills
 
-AI agent skills for integrating [Omnifence](https://docs.omnifence.ai). The repository
+AI agent skills for integrating [Omnifence](https://omnifence.ai/docs). The repository
 publishes two independent plugins. Install only the ones you use:
 
 | Plugin                  | Use it for                                                                                   |
 | ----------------------- | -------------------------------------------------------------------------------------------- |
 | `omnifence-integration` | Content moderation of prompts, chat, images, video, and audio. Most customers need only this. |
-| `omnifence-registry`    | The [Shared Registry](https://docs.omnifence.ai/registry/overview) banned-user list. Members only. |
+| `omnifence-registry`    | The [Shared Registry](https://omnifence.ai/docs/registry/overview) banned-user list. Members only. |
 
 ## Install
 
@@ -87,7 +87,7 @@ registry key. It never runs for a moderation request. It:
 - `skills/omnifence-registry/SKILL.md` — the Shared Registry procedure, with
   `references/` for email hashing, the sign-up check, and report and revoke.
 - `scripts/check-drift.mjs` — CI guard, run on every push and weekly. Against the
-  published OpenAPI spec at `https://docs.omnifence.ai/api-reference/openapi.json`: every
+  published OpenAPI spec at `https://omnifence.ai/docs/api-reference/openapi.json`: every
   endpoint path, method, response field, response status, enum value, and query parameter
   the skill relies on must exist, retired endpoints must not appear, and the size limits
   the skill states must match. Against the published docs pages: error codes, failed-job
@@ -101,5 +101,5 @@ registry key. It never runs for a moderation request. It:
 
 ## Docs
 
-- API reference: https://docs.omnifence.ai/api-reference/introduction
-- Quickstart: https://docs.omnifence.ai/quickstart
+- API reference: https://omnifence.ai/docs/api-reference/introduction
+- Quickstart: https://omnifence.ai/docs/quickstart
