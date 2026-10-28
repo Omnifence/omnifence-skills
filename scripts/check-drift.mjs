@@ -18,8 +18,9 @@
  * Spec source: https://omnifence.ai/docs/api-reference/openapi.json
  * (exported by the API repo's `yarn export:openapi`, hosted by the docs site).
  * Docs source: the same site's raw markdown (`<page>.md`).
- * Local runs: SPEC_URL=<url or file> and DOCS_URL=<url>, or DOCS_DIR=<the API
- * repo's docs/ directory> to check against unpublished `.mdx` sources.
+ * Local runs: SPEC_URL=<url or file> and DOCS_URL=<url>, or DOCS_DIR=<a docs
+ * directory> to check against unpublished sources: the site repo's
+ * `src/content/docs` (`.md`) or the API repo's archived `docs/` (`.mdx`).
  */
 
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -183,9 +184,16 @@ async function loadSpec() {
   return res.json();
 }
 
-/** Raw markdown of one docs page: `<page>.md` from the site, or `<page>.mdx` from DOCS_DIR. */
+/** Raw markdown of one docs page: `<page>.md` from the site, or `<page>.md` / `<page>.mdx` from DOCS_DIR. */
 async function loadDoc(page) {
-  if (DOCS_DIR) return readFile(join(DOCS_DIR, `${page}.mdx`), 'utf8');
+  if (DOCS_DIR) {
+    try {
+      return await readFile(join(DOCS_DIR, `${page}.md`), 'utf8');
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      return readFile(join(DOCS_DIR, `${page}.mdx`), 'utf8');
+    }
+  }
   const url = `${DOCS_URL}/${page}.md`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch docs page (${res.status}) from ${url}`);
