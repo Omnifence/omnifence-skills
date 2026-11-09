@@ -100,7 +100,7 @@ treat an absent or unknown code as "resubmit once, then surface to an operator".
 | `error_code`            | Meaning                                                              | Action                                                        |
 | ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
 | `PROVIDER_RATE_LIMITED` | The AI provider rate-limited the job past its retry window.          | Resubmit after a short delay.                                 |
-| `PROVIDER_UNAVAILABLE`  | The AI provider returned server errors on every attempt.             | Resubmit after a short delay.                                 |
+| `PROVIDER_UNAVAILABLE`  | The AI provider returned server errors, or could not fetch a reachable media URL, on every attempt. | Resubmit after a short delay.                                 |
 | `PROVIDER_TIMEOUT`      | The AI provider did not answer in time on every attempt.             | Resubmit after a short delay.                                 |
 | `MODEL_UNAVAILABLE`     | The configured model is not served for this input.                   | Resubmit after a short delay.                                 |
 | `MODEL_REFUSED`         | The model refused this exact input.                                  | Do not resubmit it unchanged. Handle as undecidable.          |
