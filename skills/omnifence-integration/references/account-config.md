@@ -126,6 +126,42 @@ are `nsfw`, `text`, and the `default_*` IDs; values are booleans. The body is th
 new state, so an omitted key is treated as enabled — a partial PUT silently re-enables
 anything it leaves out.
 
+## Risk scores per category
+
+A completed job can carry two informational objects next to the decision:
+
+- `scores` — one number per built-in policy category, keyed by the same `default_<id>` key
+  that `enabled_categories` and `GET /api/v1/me/default-categories` use (for example
+  `default_violence`).
+- `custom_scores` — one number per custom category, keyed by the category `slug`.
+
+Each value is from `0` (clearly does not match) to `1` (clearly matches), with two decimals.
+They appear on `GET /api/v1/job/{id}`, the job webhook, and each item of a text batch read
+and the batch webhook, for text, image, video and audio jobs.
+
+```json
+{
+  "is_prohibited": false,
+  "scores": { "default_violence": 0.71 },
+  "custom_scores": { "coffee": 0.05 }
+}
+```
+
+Rules for an integration:
+
+- **`is_prohibited` is the decision. The scores never are.** A score can be high on a pass
+  and low on a rejection. Never release, hold or reject content on a score. Use the scores
+  only on top of the verdict: a review queue for passed content above a threshold the user
+  picks, a dashboard, an operator view.
+- **Both objects are optional.** They are absent on a `queued`, `processing` or `failed`
+  job, and on a completed job that produced no score. Any single key can be missing. Read
+  them with a fallback (`job.scores ?? {}`) and never require a key.
+- **Disabled categories are not scored**, and child-safety categories never appear.
+- **Read the keys from the data; do not hard-code a list.** The set of default categories
+  and the account's custom categories can change.
+- A video score is the highest score for that category over the analysed video. Audio
+  uses the same keys as text, scored on the transcript.
+
 ## API key attribution
 
 A job records the API key it was submitted with. `GET /api/v1/job/{id}` and

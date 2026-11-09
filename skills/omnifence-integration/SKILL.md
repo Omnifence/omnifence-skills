@@ -244,6 +244,17 @@ A completed job carries:
   `references/account-config.md`.
 - `nsfw` — informational label on image/video jobs when the NSFW check is enabled; it
   never causes a rejection on its own.
+- `scores` and `custom_scores` — optional, informational risk scores from 0 to 1 per
+  category. `scores` is keyed by the built-in category key used in `enabled_categories`
+  (`default_<id>`); `custom_scores` by custom category slug. Text, image, video and audio
+  jobs, and each text batch item, can carry them.
+
+**`is_prohibited` is the only decision.** A score can be high on a pass and low on a
+rejection. Never release, hold or reject content on a score. Use the scores only on top of
+the verdict — a review queue, a dashboard, a threshold the user picks for extra review.
+Both objects are optional: they are absent on pending and failed jobs and when no score was
+produced, and any single key can be missing, so never require one. Disabled categories are
+not scored, and child-safety categories never appear. See `references/account-config.md`.
 
 A **failed** job (`status: "failed"`, `is_prohibited: null`) reached no decision. It is
 refunded, and it keeps the content held. Its optional `error_code` says whether a
@@ -303,11 +314,13 @@ agreed in step 3.
   stale signature → `400` and nothing released; a **signed** `completed` body whose
   `is_prohibited` is missing, `null`, or not a boolean → nothing released; a **signed**
   `failed` body → `2xx`, content held and marked failed; a replayed `delivery_id` →
-  acknowledged twice, released once. Cover submission too: a `503
-  SUBMISSION_STATUS_UNKNOWN` → the returned `job_id` is stored and no second job is
-  submitted; a `413`/`415`/`422` → no retry of the same URL. At a batched form, cover one
-  rejected field → only that field is marked and the save is refused, and one failed item →
-  the form stays held.
+  acknowledged twice, released once; a **signed** `completed` body with
+  `is_prohibited: false` and a high score → released, because a score never decides; a
+  body with no `scores`, an empty one, or an unknown extra field → handled, never a
+  `400`. Cover submission too: a `503 SUBMISSION_STATUS_UNKNOWN` → the returned `job_id`
+  is stored and no second job is submitted; a `413`/`415`/`422` → no retry of the same
+  URL. At a batched form, cover one rejected field → only that field is marked and the save
+  is refused, and one failed item → the form stays held.
 - **Never touch `/api/v1/admin/*`.** Those routes are for Omnifence operators, not for
   integrations. Do not call them, document them, or store credentials for them.
 - **One API key per approved call site.** Jobs record the key they were submitted with

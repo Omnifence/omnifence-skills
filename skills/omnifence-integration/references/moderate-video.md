@@ -62,3 +62,8 @@ curl -X POST https://api.omnifence.ai/api/v1/moderate/video \
 
 Same shape as image moderation: `is_prohibited`, optional `reason` on a rejection, and
 the informational `nsfw` label when that check is enabled.
+
+The optional `scores` and `custom_scores` objects are informational, as on an image. A video
+score is the highest score for that category over the analysed video. `is_prohibited` is the
+decision; never release or hold on a score, and never require a key. See
+`account-config.md`.

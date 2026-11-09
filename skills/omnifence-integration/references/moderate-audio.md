@@ -2,7 +2,7 @@
 
 Moderate a generated audio clip (for example AI-voiced speech). Call it **after**
 generation, before the audio is published. The clip is transcribed, and the transcript
-runs through the same keyword blocklist and LLM prohibition check as text moderation.
+runs through the same keyword blocklist and prohibition check as text moderation.
 
 This moderates **transcribed speech** only — music, sound effects, and other non-verbal
 audio are not classified. A clip with no speech in it (music without words, sound effects,
@@ -49,3 +49,7 @@ curl -X POST https://api.omnifence.ai/api/v1/moderate/audio \
 Same shape as text moderation: `is_prohibited` plus a `reason` on a rejection. A
 rejection `reason` is model-generated text scrubbed of verbatim quotation on a
 best-effort basis; it may paraphrase what was said.
+
+The optional `scores` and `custom_scores` objects use the same keys as text, scored on the
+transcript. They are informational: `is_prohibited` is the decision, and any key can be
+missing. See `account-config.md`.
