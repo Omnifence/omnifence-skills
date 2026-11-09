@@ -69,8 +69,8 @@ async function pollJob(jobId, { intervalMs = 4000, timeoutMs = 10 * 60 * 1000 } 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 ```
 
-A `completed` job can also carry `scores` and `custom_scores`: informational risk scores
-per category, from 0 to 1. Decide on `is_prohibited` only, never on a score. Both objects
+A `completed` text or audio job can also carry `scores` and `custom_scores`: informational
+risk scores per category, from 0 to 1. Image and video jobs do not return risk scores. Decide on `is_prohibited` only, never on a score. Both objects
 are optional and any key can be missing, so read them as `job.scores ?? {}`. See
 `account-config.md`.
 
@@ -83,7 +83,7 @@ interface OmnifenceJob {
   is_prohibited: boolean | null;
   reason?: string;
   nsfw?: boolean;
-  scores?: Record<string, number>;        // informational, keyed by default_<id>
+  scores?: Record<string, number>;        // informational, keyed by category ID (no default_ prefix)
   custom_scores?: Record<string, number>; // informational, keyed by custom category slug
   error_code?: string;
 }

@@ -158,7 +158,7 @@ Omnifence POSTs a JSON body when a job settles. A job that reached a decision se
 {
   "is_prohibited": true,
   "reason": "The text requests sexual content involving a minor.",
-  "scores": { "default_violence": 0.02 },
+  "scores": { "violence": 0.02 },
   "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "completed",
   "completed_at": "2026-05-19T12:00:01.500Z",
@@ -193,8 +193,8 @@ charge for it is refunded:
 | `delivery_id`   | Always           | Stable across retries of this delivery — the idempotency key.                |
 | `reason`        | Rejections only  | Why the content was rejected.                                                |
 | `nsfw`          | Image/video only | Informational label, when the NSFW check is on.                              |
-| `scores`        | `completed`, optional | Informational risk score per built-in category (`default_<id>`), 0 to 1. |
-| `custom_scores` | `completed`, optional | Informational risk score per custom category slug, 0 to 1.          |
+| `scores`        | `completed`, optional | Informational risk score per built-in category (keyed by category ID without the `default_` prefix), 0 to 1. Text and audio jobs only. |
+| `custom_scores` | `completed`, optional | Informational risk score per custom category slug, 0 to 1. Text and audio jobs only. |
 | `error_code`    | `failed` only    | Why the job failed, when the pipeline knows. The values are in `polling.md`. |
 
 - `reason` is present only when `is_prohibited` is `true`. It names the policy or the
@@ -203,7 +203,8 @@ charge for it is refunded:
   informational and never a rejection by itself.
 - `scores` and `custom_scores` are informational. `is_prohibited` is the decision: a score
   can be high on a pass and low on a rejection, so never release or hold on a score. Both
-  are optional and any key can be missing — never require them. Store them for a review
+  are optional and any key can be missing — never require them. Image and video jobs do
+  not return risk scores. Store them for a review
   queue or a dashboard if the user wants one. See `account-config.md`.
 - There is no `type` field in a job payload — match `job_id` against the job IDs stored at
   submission time to know which content the decision belongs to. (`GET /api/v1/job/{id}`

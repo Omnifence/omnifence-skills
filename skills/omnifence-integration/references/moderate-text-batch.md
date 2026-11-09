@@ -104,7 +104,7 @@ job webhook has no `type` — so a handler that receives both must branch on `ty
   "completed_at": "2026-10-06T14:02:03.494Z",
   "items": [
     { "key": "backstory", "job_id": "6c3f2e78-a17a-44a9-b259-d3344eee8bf3", "status": "completed", "is_prohibited": true, "reason": "The text contained a blacklisted keyword." },
-    { "key": "name", "job_id": "b4c38526-b18b-431c-ab54-9e3b82bf26f0", "status": "completed", "is_prohibited": false, "scores": { "default_violence": 0.04 } },
+    { "key": "name", "job_id": "b4c38526-b18b-431c-ab54-9e3b82bf26f0", "status": "completed", "is_prohibited": false, "scores": { "violence": 0.04 } },
     { "key": "tagline", "job_id": "9c8a428b-be51-4776-86ba-e013f4d519fb", "status": "failed", "is_prohibited": null, "error_code": "PROVIDER_TIMEOUT" }
   ],
   "delivery_id": "wh_batch_96cf89a8-4baa-44a4-a953-010f4486882d"
