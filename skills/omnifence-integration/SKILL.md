@@ -247,14 +247,14 @@ A completed job carries:
 - `scores` and `custom_scores` — optional, informational risk scores from 0 to 1 per
   category. `scores` is keyed by the built-in category ID without the `default_` prefix
   that `enabled_categories` uses (`default_violence` is scored as `violence`);
-  `custom_scores` by custom category slug. Text, image, video and audio
-  jobs, and each text batch item, can carry them.
+  `custom_scores` by custom category slug. Text and audio jobs, and each
+  text batch item, can carry them. Image and video jobs do not return risk scores.
 
 **`is_prohibited` is the only decision.** A score can be high on a pass and low on a
 rejection. Never release, hold or reject content on a score. Use the scores only on top of
 the verdict — a review queue, a dashboard, a threshold the user picks for extra review.
-Both objects are optional: they are absent on pending and failed jobs and when no score was
-produced, and any single key can be missing, so never require one. Disabled categories are
+Both objects are optional: they are absent on image and video jobs, on pending and failed
+jobs, and when no score was produced, and any single key can be missing, so never require one. Disabled categories are
 not scored, and child-safety categories never appear. See `references/account-config.md`.
 
 A **failed** job (`status: "failed"`, `is_prohibited: null`) reached no decision. It is

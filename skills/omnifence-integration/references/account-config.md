@@ -128,7 +128,8 @@ anything it leaves out.
 
 ## Risk scores per category
 
-A completed job can carry two informational objects next to the decision:
+A completed text or audio job, and each completed text batch item, can carry two
+informational objects next to the decision:
 
 - `scores` — one number per built-in policy category, keyed by the category ID without the
   `default_` prefix that `enabled_categories` and `GET /api/v1/me/default-categories` use (for
@@ -137,7 +138,7 @@ A completed job can carry two informational objects next to the decision:
 
 Each value is from `0` (clearly does not match) to `1` (clearly matches), with two decimals.
 They appear on `GET /api/v1/job/{id}`, the job webhook, and each item of a text batch read
-and the batch webhook, for text, image, video and audio jobs.
+and the batch webhook. Image and video jobs do not return risk scores.
 
 ```json
 {
@@ -153,14 +154,13 @@ Rules for an integration:
   and low on a rejection. Never release, hold or reject content on a score. Use the scores
   only on top of the verdict: a review queue for passed content above a threshold the user
   picks, a dashboard, an operator view.
-- **Both objects are optional.** They are absent on a `queued`, `processing` or `failed`
-  job, and on a completed job that produced no score. Any single key can be missing. Read
+- **Both objects are optional.** They are absent on an image or video job, on a
+  `queued`, `processing` or `failed` job, and on a completed job that produced no score. Any single key can be missing. Read
   them with a fallback (`job.scores ?? {}`) and never require a key.
 - **Disabled categories are not scored**, and child-safety categories never appear.
 - **Read the keys from the data; do not hard-code a list.** The set of default categories
   and the account's custom categories can change.
-- A video score is the highest score for that category over the analysed video. Audio
-  uses the same keys as text, scored on the transcript.
+- Audio uses the same keys as text, scored on the transcript.
 
 ## API key attribution
 
