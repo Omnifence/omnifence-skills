@@ -127,6 +127,13 @@ yet, and a missing or renamed field is `undefined` — both are falsy, so `if (i
 defect, or a schema change reaches the endpoint. Fail closed on any other shape: leave
 the content held and let the reconciliation poll settle it.
 
+Validate only the fields the handler needs, and accept every other field. Never parse the
+body with a strict schema that rejects unknown fields (`.strict()` in Zod,
+`additionalProperties: false`, `extra = "forbid"` in Pydantic). Omnifence adds optional
+fields to the payload — `scores` and `custom_scores` are recent examples — and a strict
+schema answers each new field with a `400`, which holds every decision until the retries
+run out.
+
 ## Deduplicate by claiming, before the side effect
 
 `delivery_id` is stable across retries, so it is the idempotency key. Claim it with a
@@ -151,12 +158,16 @@ Omnifence POSTs a JSON body when a job settles. A job that reached a decision se
 {
   "is_prohibited": true,
   "reason": "The text requests sexual content involving a minor.",
+  "scores": { "default_violence": 0.02 },
   "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "completed",
   "completed_at": "2026-05-19T12:00:01.500Z",
   "delivery_id": "wh_a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
+
+This rejection carries a low score: child-safety categories are never scored, and a score
+never decides the job.
 
 A job that used up its retries without a decision sends a `failed` notice instead. The
 charge for it is refunded:
@@ -182,12 +193,18 @@ charge for it is refunded:
 | `delivery_id`   | Always           | Stable across retries of this delivery — the idempotency key.                |
 | `reason`        | Rejections only  | Why the content was rejected.                                                |
 | `nsfw`          | Image/video only | Informational label, when the NSFW check is on.                              |
+| `scores`        | `completed`, optional | Informational risk score per built-in category (`default_<id>`), 0 to 1. |
+| `custom_scores` | `completed`, optional | Informational risk score per custom category slug, 0 to 1.          |
 | `error_code`    | `failed` only    | Why the job failed, when the pipeline knows. The values are in `polling.md`. |
 
 - `reason` is present only when `is_prohibited` is `true`. It names the policy or the
   custom category that tripped — see `account-config.md`.
 - `nsfw` appears only on image/video jobs with the NSFW check enabled; it is
   informational and never a rejection by itself.
+- `scores` and `custom_scores` are informational. `is_prohibited` is the decision: a score
+  can be high on a pass and low on a rejection, so never release or hold on a score. Both
+  are optional and any key can be missing — never require them. Store them for a review
+  queue or a dashboard if the user wants one. See `account-config.md`.
 - There is no `type` field in a job payload — match `job_id` against the job IDs stored at
   submission time to know which content the decision belongs to. (`GET /api/v1/job/{id}`
   does return `type`.)
@@ -224,7 +241,7 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
     return handleBatch(payload, res);
   }
 
-  const { job_id, is_prohibited, reason, delivery_id, status, error_code } = payload;
+  const { job_id, is_prohibited, reason, delivery_id, status, error_code, scores, custom_scores } = payload;
 
   // The signature authenticated the sender, not the shape. Release only on an
   // explicit boolean false on a `completed` callback — `null`, undefined, or any
@@ -254,6 +271,10 @@ app.post('/webhooks/omnifence', express.raw({ type: 'application/json' }), async
   } else {
     await release(content); // the only path that publishes content
   }
+
+  // Optional and informational: keep the per-category scores for a review queue or a
+  // dashboard. They never change the decision above, and either object may be absent.
+  if (isDecision) await recordScores(content, scores ?? {}, custom_scores ?? {});
 
   res.sendStatus(200);
 });

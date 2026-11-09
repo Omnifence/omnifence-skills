@@ -72,6 +72,8 @@ const REQUIRED_FIELDS = [
   { path: '/api/v1/moderate/text/batch', method: 'post', status: '503', fields: ['batch_id'] },
   { path: '/api/v1/moderate/text/batch/{batch_id}', method: 'get', status: '200', fields: ['type', 'batch_id', 'status', 'completed_at', 'items'] },
   { path: '/api/v1/job/{id}', method: 'get', status: '200', fields: ['batch_id', 'batch_key'] },
+  // Informational per-category risk scores (references/account-config.md).
+  { path: '/api/v1/job/{id}', method: 'get', status: '200', fields: ['scores', 'custom_scores'] },
   // Shared Registry (skills/omnifence-registry).
   { path: '/api/v1/registry/check', method: 'post', status: '200', fields: ['match', 'signals', 'normalisation_version'] },
   ...['200', '201'].map((status) => ({
@@ -89,7 +91,7 @@ const REQUIRED_ITEM_FIELDS = [
   },
   {
     path: '/api/v1/moderate/text/batch/{batch_id}', method: 'get', status: '200', array: 'items',
-    fields: ['key', 'job_id', 'status', 'is_prohibited', 'reason', 'error_code'],
+    fields: ['key', 'job_id', 'status', 'is_prohibited', 'reason', 'error_code', 'scores', 'custom_scores'],
   },
   {
     path: '/api/v1/registry/check', method: 'post', status: '200', array: 'signals',

@@ -82,8 +82,8 @@ registry key. It never runs for a moderation request. It:
 - `skills/omnifence-integration/references/` — per-endpoint request/response examples,
   a shared submit helper with the full error table, a signature-verifying webhook handler
   (completed and failed callbacks), a polling loop, and the account configuration
-  (custom and default categories, check toggles, API key attribution) that changes what
-  a decision means.
+  (custom and default categories, check toggles, per-category risk scores, API key
+  attribution) that changes what a decision means.
 - `skills/omnifence-registry/SKILL.md` — the Shared Registry procedure, with
   `references/` for email hashing, the sign-up check, and report and revoke.
 - `scripts/check-drift.mjs` — CI guard, run on every push and weekly. Against the

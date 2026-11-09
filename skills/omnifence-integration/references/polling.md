@@ -51,7 +51,7 @@ async function pollJob(jobId, { intervalMs = 4000, timeoutMs = 10 * 60 * 1000 } 
     if (!res.ok) throw new Error(`Job lookup failed: ${res.status}`);
 
     const job = await res.json();
-    if (job.status === 'completed') return job; // { is_prohibited, reason?, nsfw?, ... }
+    if (job.status === 'completed') return job; // { is_prohibited, reason?, nsfw?, scores?, custom_scores?, ... }
     if (job.status === 'failed') return job;    // treat as NOT a pass — keep content held
 
     // Slow down when the shared budget runs low.
@@ -67,6 +67,26 @@ async function pollJob(jobId, { intervalMs = 4000, timeoutMs = 10 * 60 * 1000 } 
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+```
+
+A `completed` job can also carry `scores` and `custom_scores`: informational risk scores
+per category, from 0 to 1. Decide on `is_prohibited` only, never on a score. Both objects
+are optional and any key can be missing, so read them as `job.scores ?? {}`. See
+`account-config.md`.
+
+A typed client declares them as optional maps:
+
+```ts
+interface OmnifenceJob {
+  job_id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  is_prohibited: boolean | null;
+  reason?: string;
+  nsfw?: boolean;
+  scores?: Record<string, number>;        // informational, keyed by default_<id>
+  custom_scores?: Record<string, number>; // informational, keyed by custom category slug
+  error_code?: string;
+}
 ```
 
 A `failed` job never reached a moderation decision. Treat it like a timeout: the content
