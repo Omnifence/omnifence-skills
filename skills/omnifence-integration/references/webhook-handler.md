@@ -158,7 +158,7 @@ Omnifence POSTs a JSON body when a job settles. A job that reached a decision se
 {
   "is_prohibited": true,
   "reason": "The text requests sexual content involving a minor.",
-  "scores": { "default_violence": 0.02 },
+  "scores": { "violence": 0.02 },
   "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "completed",
   "completed_at": "2026-05-19T12:00:01.500Z",
@@ -193,7 +193,7 @@ charge for it is refunded:
 | `delivery_id`   | Always           | Stable across retries of this delivery — the idempotency key.                |
 | `reason`        | Rejections only  | Why the content was rejected.                                                |
 | `nsfw`          | Image/video only | Informational label, when the NSFW check is on.                              |
-| `scores`        | `completed`, optional | Informational risk score per built-in category (`default_<id>`), 0 to 1. |
+| `scores`        | `completed`, optional | Informational risk score per built-in category (keyed by category ID without the `default_` prefix), 0 to 1. |
 | `custom_scores` | `completed`, optional | Informational risk score per custom category slug, 0 to 1.          |
 | `error_code`    | `failed` only    | Why the job failed, when the pipeline knows. The values are in `polling.md`. |
 

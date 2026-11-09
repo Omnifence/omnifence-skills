@@ -83,7 +83,7 @@ interface OmnifenceJob {
   is_prohibited: boolean | null;
   reason?: string;
   nsfw?: boolean;
-  scores?: Record<string, number>;        // informational, keyed by default_<id>
+  scores?: Record<string, number>;        // informational, keyed by category ID (no default_ prefix)
   custom_scores?: Record<string, number>; // informational, keyed by custom category slug
   error_code?: string;
 }

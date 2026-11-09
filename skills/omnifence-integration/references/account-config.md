@@ -130,9 +130,9 @@ anything it leaves out.
 
 A completed job can carry two informational objects next to the decision:
 
-- `scores` — one number per built-in policy category, keyed by the same `default_<id>` key
-  that `enabled_categories` and `GET /api/v1/me/default-categories` use (for example
-  `default_violence`).
+- `scores` — one number per built-in policy category, keyed by the category ID without the
+  `default_` prefix that `enabled_categories` and `GET /api/v1/me/default-categories` use (for
+  example `violence` for `default_violence`). Strip the prefix to match a score to its setting.
 - `custom_scores` — one number per custom category, keyed by the category `slug`.
 
 Each value is from `0` (clearly does not match) to `1` (clearly matches), with two decimals.
@@ -142,7 +142,7 @@ and the batch webhook, for text, image, video and audio jobs.
 ```json
 {
   "is_prohibited": false,
-  "scores": { "default_violence": 0.71 },
+  "scores": { "violence": 0.71 },
   "custom_scores": { "coffee": 0.05 }
 }
 ```

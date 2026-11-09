@@ -46,7 +46,7 @@ curl -X POST https://api.omnifence.ai/api/v1/moderate/text \
 {
   "is_prohibited": true,
   "reason": "The text requests sexual content involving a minor.",
-  "scores": { "default_violence": 0.02 },
+  "scores": { "violence": 0.02 },
   "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "completed",
   "completed_at": "2026-05-19T12:00:01.500Z"
@@ -55,7 +55,7 @@ curl -X POST https://api.omnifence.ai/api/v1/moderate/text \
 
 Text that passes returns `is_prohibited: false` with no `reason`.
 
-`scores` (keyed by `default_<id>`) and `custom_scores` (keyed by custom category slug) are
+`scores` (keyed by the category ID without the `default_` prefix, e.g. `violence`) and `custom_scores` (keyed by custom category slug) are
 optional, informational risk scores from 0 to 1. `is_prohibited` is the decision: a score
 can be high on a pass and low on a rejection, as above, where the child-safety category
 that rejected the text is never scored. Never release or hold on a score, and never require

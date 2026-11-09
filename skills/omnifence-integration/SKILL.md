@@ -245,8 +245,9 @@ A completed job carries:
 - `nsfw` — informational label on image/video jobs when the NSFW check is enabled; it
   never causes a rejection on its own.
 - `scores` and `custom_scores` — optional, informational risk scores from 0 to 1 per
-  category. `scores` is keyed by the built-in category key used in `enabled_categories`
-  (`default_<id>`); `custom_scores` by custom category slug. Text, image, video and audio
+  category. `scores` is keyed by the built-in category ID without the `default_` prefix
+  that `enabled_categories` uses (`default_violence` is scored as `violence`);
+  `custom_scores` by custom category slug. Text, image, video and audio
   jobs, and each text batch item, can carry them.
 
 **`is_prohibited` is the only decision.** A score can be high on a pass and low on a

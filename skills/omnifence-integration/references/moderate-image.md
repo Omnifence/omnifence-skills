@@ -45,7 +45,7 @@ curl -X POST https://api.omnifence.ai/api/v1/moderate/image \
 {
   "is_prohibited": false,
   "nsfw": false,
-  "scores": { "default_violence": 0.12 },
+  "scores": { "violence": 0.12 },
   "custom_scores": { "coffee": 0.03 },
   "job_id": "8298ed3d-b2e9-409d-9084-bb481934476a",
   "status": "completed",
@@ -56,7 +56,7 @@ curl -X POST https://api.omnifence.ai/api/v1/moderate/image \
 `nsfw` is an informational label — it never causes a rejection on its own, and it is
 omitted when the client has disabled the NSFW check. A rejection adds a `reason` string.
 
-`scores` (keyed by `default_<id>`) and `custom_scores` (keyed by custom category slug) are
+`scores` (keyed by the category ID without the `default_` prefix, e.g. `violence`) and `custom_scores` (keyed by custom category slug) are
 informational risk scores from 0 to 1. `is_prohibited` is the decision; never release or
 hold on a score. Both objects are optional and any key can be missing. Disabled categories
 are not scored, and child-safety categories never appear. See `account-config.md`.
