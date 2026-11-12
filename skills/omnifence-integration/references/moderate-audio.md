@@ -23,6 +23,12 @@ Requires the `moderate:audio` scope.
 A URL with another scheme, or one that resolves to a private or internal network
 address, is rejected with `400 INVALID_REQUEST`.
 
+The clip is fetched and read after the job is accepted. A file that is not a supported
+audio format (`mp3`, `m4a`/`mp4`, `wav`, `flac`, `ogg`, `webm`, `aac`), has no audio
+track, or cannot be read fails the job with `error_code` `UNSUPPORTED_MEDIA`. A URL the
+origin refuses (404, expired signed URL) fails it with `MEDIA_UNREACHABLE`. A browser
+`MediaRecorder` `webm` is supported.
+
 ```js
 // submitModeration() is the helper in submission-errors.md. It returns the job ID —
 // including the recovery ID of a 503 SUBMISSION_STATUS_UNKNOWN, flagged by
